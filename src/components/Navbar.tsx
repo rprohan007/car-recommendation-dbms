@@ -1,211 +1,220 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useSession, signOut } from 'next-auth/react';
+import { Car, Scale, Sparkles, Calendar, Shield, Menu, X, LogIn, LogOut, User } from 'lucide-react';
 
 export default function Navbar() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const user = session?.user;
   const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
 
   const navLinks = [
-    { label: 'Overview', href: '/' },
-    { label: 'Upcoming', href: '/api/upcoming' },
-    { label: 'Compare', href: '/api/compare?ids=1,2,3' },
+    { label: 'Recommendations', href: '/', icon: Sparkles },
+    { label: 'Compare', href: '/compare', icon: Scale },
+    { label: 'Upcoming Launches', href: '/upcoming', icon: Calendar },
   ];
 
   return (
-    <header
-      style={{
-        position: 'sticky',
-        top: 0,
-        zIndex: 50,
-        backdropFilter: 'blur(12px)',
-        backgroundColor: 'rgba(15, 23, 42, 0.85)',
-        borderBottom: '1px solid rgba(51, 65, 85, 0.6)',
-        padding: '0.875rem 1.75rem',
-        boxSizing: 'border-box',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '1200px',
-          margin: '0 auto',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        {/* Brand Logo */}
-        <Link
-          href="/"
-          style={{
-            textDecoration: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.6rem',
-          }}
-        >
-          <div
-            style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '8px',
-              background: 'linear-gradient(135deg, #38bdf8 0%, #3b82f6 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 800,
-              color: '#ffffff',
-              fontSize: '1rem',
-              boxShadow: '0 0 15px rgba(56, 189, 248, 0.4)',
-            }}
+    <header className="sticky top-0 z-50 backdrop-blur-xl bg-slate-950/80 border-b border-slate-800/80 transition-colors">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          {/* Brand Logo */}
+          <Link
+            href="/"
+            className="flex items-center gap-3 group focus:outline-none"
           >
-            🚗
-          </div>
-          <span
-            style={{
-              fontSize: '1.2rem',
-              fontWeight: 800,
-              background: 'linear-gradient(to right, #ffffff, #cbd5e1)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            AutoMatch <span style={{ color: '#38bdf8' }}>DBMS</span>
-          </span>
-        </Link>
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-sky-500 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-sky-500/25 group-hover:scale-105 transition-transform duration-200">
+              <Car className="w-5 h-5 text-white" />
+            </div>
+            <div className="flex flex-col">
+              <span className="font-extrabold text-lg sm:text-xl tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-400 bg-clip-text text-transparent group-hover:from-sky-300 group-hover:to-white transition-all">
+                AutoMatch <span className="text-sky-400 font-black">DBMS</span>
+              </span>
+              <span className="text-[10px] tracking-wider uppercase text-slate-400 font-semibold -mt-1 hidden sm:block">
+                Intelligent Vehicle Matrix
+              </span>
+            </div>
+          </Link>
 
-        {/* Central Navigation */}
-        <nav style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          {navLinks.map((item) => {
-            const isActive = pathname === item.href;
-            return (
+          {/* Desktop Navigation */}
+          <nav className="hidden md:flex items-center gap-1 lg:gap-2">
+            {navLinks.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                    isActive
+                      ? 'text-sky-400 bg-sky-500/10 border border-sky-500/25 shadow-sm shadow-sky-500/10'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-sky-400' : 'text-slate-400'}`} />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+
+            {/* Admin Link if role is Admin */}
+            {isAdmin && (
               <Link
-                key={item.label}
-                href={item.href}
-                style={{
-                  textDecoration: 'none',
-                  color: isActive ? '#38bdf8' : '#94a3b8',
-                  fontSize: '0.9rem',
-                  fontWeight: 500,
-                  transition: 'color 0.2s',
-                }}
+                href="/admin"
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-sm font-semibold transition-all duration-150 ${
+                  pathname.startsWith('/admin')
+                    ? 'text-rose-400 bg-rose-500/15 border border-rose-500/30'
+                    : 'text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 border border-rose-500/20'
+                }`}
               >
-                {item.label}
+                <Shield className="w-4 h-4 text-rose-400" />
+                <span>Admin Console</span>
               </Link>
-            );
-          })}
+            )}
+          </nav>
 
-          {/* Conditional Admin Dashboard Link: Visible ONLY to ADMIN */}
-          {isAdmin && (
-            <Link
-              href="/admin"
-              style={{
-                textDecoration: 'none',
-                color: pathname.startsWith('/admin') ? '#f43f5e' : '#fb7185',
-                backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                border: '1px solid rgba(244, 63, 94, 0.3)',
-                padding: '4px 10px',
-                borderRadius: '6px',
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-              }}
-            >
-              <span>🛡️</span> Admin Dashboard
-            </Link>
-          )}
-        </nav>
-
-        {/* User Auth Session Section */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          {status === 'loading' ? (
-            <div style={{ color: '#64748b', fontSize: '0.85rem' }}>Checking session...</div>
-          ) : session ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.875rem' }}>
-              {/* Profile Details */}
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ color: '#f1f5f9', fontSize: '0.875rem', fontWeight: 600 }}>
-                  {user?.name || user?.email}
-                </div>
-                {/* Role Badge */}
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+          {/* Desktop Auth / User Controls */}
+          <div className="hidden md:flex items-center gap-3">
+            {status === 'loading' ? (
+              <div className="text-xs text-slate-500 animate-pulse px-3 py-1">
+                Verifying session...
+              </div>
+            ) : session ? (
+              <div className="flex items-center gap-3">
+                <div className="flex flex-col items-end text-right">
+                  <div className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+                    <User className="w-3.5 h-3.5 text-slate-400" />
+                    <span>{user?.name || user?.email}</span>
+                  </div>
                   <span
-                    style={{
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.05em',
-                      padding: '2px 7px',
-                      borderRadius: '9999px',
-                      backgroundColor: isAdmin ? 'rgba(239, 68, 68, 0.2)' : 'rgba(56, 189, 248, 0.15)',
-                      color: isAdmin ? '#f87171' : '#38bdf8',
-                      border: `1px solid ${isAdmin ? 'rgba(239, 68, 68, 0.4)' : 'rgba(56, 189, 248, 0.3)'}`,
-                    }}
+                    className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                      isAdmin
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                        : 'bg-sky-500/20 text-sky-400 border border-sky-500/40'
+                    }`}
                   >
-                    {user?.role || 'CUSTOMER'}
+                    {user?.role || 'Customer'}
                   </span>
                 </div>
+                <button
+                  onClick={() => signOut({ callbackUrl: '/login' })}
+                  className="flex items-center gap-1.5 text-xs font-medium text-slate-300 hover:text-white bg-slate-800/80 hover:bg-slate-700/80 border border-slate-700 px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Logout</span>
+                </button>
               </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Link
+                  href="/login"
+                  className="text-xs font-medium text-slate-300 hover:text-white px-3 py-1.5 rounded-lg hover:bg-slate-800/60 transition-colors"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/register"
+                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-950 bg-gradient-to-r from-sky-400 to-sky-300 hover:from-sky-300 hover:to-sky-200 px-3.5 py-1.5 rounded-lg transition-all shadow-md shadow-sky-500/20 font-sans"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Register</span>
+                </Link>
+              </div>
+            )}
+          </div>
 
-              {/* Sign Out Button */}
-              <button
-                onClick={() => signOut({ callbackUrl: '/login' })}
-                style={{
-                  background: 'rgba(51, 65, 85, 0.5)',
-                  border: '1px solid #475569',
-                  color: '#e2e8f0',
-                  borderRadius: '6px',
-                  padding: '6px 12px',
-                  fontSize: '0.825rem',
-                  fontWeight: 500,
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                }}
-              >
-                Sign Out
-              </button>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Link
-                href="/login"
-                style={{
-                  textDecoration: 'none',
-                  color: '#e2e8f0',
-                  fontSize: '0.875rem',
-                  fontWeight: 500,
-                  padding: '6px 14px',
-                }}
-              >
-                Sign In
-              </Link>
-              <Link
-                href="/register"
-                style={{
-                  textDecoration: 'none',
-                  backgroundColor: '#38bdf8',
-                  color: '#090d16',
-                  fontSize: '0.875rem',
-                  fontWeight: 700,
-                  padding: '6px 14px',
-                  borderRadius: '6px',
-                  boxShadow: '0 0 15px rgba(56, 189, 248, 0.3)',
-                  transition: 'opacity 0.2s',
-                }}
-              >
-                Register
-              </Link>
-            </div>
-          )}
+          {/* Mobile Menu Button */}
+          <div className="flex md:hidden items-center gap-2">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 focus:outline-none"
+              aria-label="Toggle navigation menu"
+            >
+              {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Mobile Drawer Menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden border-t border-slate-800 bg-slate-950/95 backdrop-blur-2xl px-4 pt-3 pb-6 space-y-3">
+          <div className="flex flex-col space-y-1">
+            {navLinks.map((item) => {
+              const Icon = item.icon;
+              const isActive = pathname === item.href;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium ${
+                    isActive
+                      ? 'text-sky-400 bg-sky-500/10 border border-sky-500/20'
+                      : 'text-slate-300 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Icon className="w-4 h-4 text-sky-400" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+
+            {isAdmin && (
+              <Link
+                href="/admin"
+                onClick={() => setMobileMenuOpen(false)}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold text-rose-300 bg-rose-500/10 border border-rose-500/20"
+              >
+                <Shield className="w-4 h-4 text-rose-400" />
+                <span>Admin Console</span>
+              </Link>
+            )}
+          </div>
+
+          <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
+            {session ? (
+              <div className="flex items-center justify-between w-full">
+                <div>
+                  <div className="text-xs font-semibold text-slate-200">{user?.name || user?.email}</div>
+                  <span className="text-[10px] text-sky-400 uppercase font-bold">{user?.role || 'CUSTOMER'}</span>
+                </div>
+                <button
+                  onClick={() => signOut({ callbackUrl: '/login' })}
+                  className="flex items-center gap-1 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 px-3 py-1.5 rounded-lg"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 w-full">
+                <Link
+                  href="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex-1 text-center py-2 text-xs font-medium text-slate-200 bg-slate-800 border border-slate-700 rounded-lg"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  href="/register"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex-1 text-center py-2 text-xs font-bold text-slate-950 bg-sky-400 rounded-lg"
+                >
+                  Register
+                </Link>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </header>
   );
 }
