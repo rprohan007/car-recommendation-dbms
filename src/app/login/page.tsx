@@ -1,13 +1,14 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
-import { signIn } from 'next-auth/react';
+import { signIn, useSession, signOut } from 'next-auth/react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { data: session, status } = useSession();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -15,13 +16,15 @@ function LoginForm() {
   const [loading, setLoading] = useState(false);
 
   const callbackUrl = searchParams.get('callbackUrl') || '/';
-  const accessDenied = searchParams.get('error') === 'AccessDenied';
+  const errorParam = searchParams.get('error');
 
   useEffect(() => {
-    if (accessDenied) {
+    if (errorParam === 'AccessDenied') {
       setErrorMessage('Access Denied: You must be logged in as an ADMIN to view that section.');
+    } else if (errorParam === 'CredentialsSignin') {
+      setErrorMessage('Invalid email or password. Please verify your credentials and try again.');
     }
-  }, [accessDenied]);
+  }, [errorParam]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,7 +40,11 @@ function LoginForm() {
       });
 
       if (res?.error) {
-        setErrorMessage(res.error);
+        if (res.error === 'CredentialsSignin') {
+          setErrorMessage('Invalid email or password. Please check your credentials.');
+        } else {
+          setErrorMessage(res.error);
+        }
         setLoading(false);
       } else {
         router.push(callbackUrl);
@@ -117,6 +124,59 @@ function LoginForm() {
             }}
           >
             ⚠️ {errorMessage}
+          </div>
+        )}
+
+        {session?.user && (
+          <div
+            style={{
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              color: '#bae6fd',
+              padding: '0.875rem 1rem',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              marginBottom: '1.25rem',
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                Signed in as <strong>{session.user.name || session.user.email}</strong>
+                <div style={{ fontSize: '0.75rem', color: '#7dd3fc', marginTop: '2px' }}>
+                  Active Role: <strong>{(session.user.role as string)?.toUpperCase() || 'CUSTOMER'}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => signOut({ redirect: false })}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  color: '#fca5a5',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+            <div style={{ marginTop: '0.5rem', textAlign: 'right' }}>
+              <Link
+                href={callbackUrl}
+                style={{
+                  color: '#38bdf8',
+                  textDecoration: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                }}
+              >
+                Continue to app &rarr;
+              </Link>
+            </div>
           </div>
         )}
 

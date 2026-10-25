@@ -9,7 +9,8 @@ export default function Navbar() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
   const user = session?.user;
-  const isAdmin = user?.role?.toUpperCase() === 'ADMIN';
+  const userRole = (user?.role as string)?.toUpperCase() || 'CUSTOMER';
+  const isAdmin = userRole === 'ADMIN';
 
   const navLinks = [
     { label: 'Overview', href: '/' },
@@ -149,7 +150,7 @@ export default function Navbar() {
                       border: `1px solid ${isAdmin ? 'rgba(239, 68, 68, 0.4)' : 'rgba(56, 189, 248, 0.3)'}`,
                     }}
                   >
-                    {user?.role || 'CUSTOMER'}
+                    {userRole}
                   </span>
                 </div>
               </div>

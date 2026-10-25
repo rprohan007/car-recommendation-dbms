@@ -2,11 +2,12 @@
 
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { signIn } from 'next-auth/react';
+import { signIn, useSession, signOut } from 'next-auth/react';
 import Link from 'next/link';
 
 export default function RegisterPage() {
   const router = useRouter();
+  const { data: session } = useSession();
 
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -154,6 +155,59 @@ export default function RegisterPage() {
             }}
           >
             ✅ {successMessage}
+          </div>
+        )}
+
+        {session?.user && (
+          <div
+            style={{
+              backgroundColor: 'rgba(56, 189, 248, 0.12)',
+              border: '1px solid rgba(56, 189, 248, 0.35)',
+              color: '#bae6fd',
+              padding: '0.875rem 1rem',
+              borderRadius: '8px',
+              fontSize: '0.85rem',
+              marginBottom: '1.25rem',
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                Signed in as <strong>{session.user.name || session.user.email}</strong>
+                <div style={{ fontSize: '0.75rem', color: '#7dd3fc', marginTop: '2px' }}>
+                  Current Role: <strong>{(session.user.role as string)?.toUpperCase() || 'CUSTOMER'}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => signOut({ redirect: false })}
+                style={{
+                  background: 'rgba(239, 68, 68, 0.2)',
+                  border: '1px solid rgba(239, 68, 68, 0.4)',
+                  color: '#fca5a5',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                }}
+              >
+                Sign Out
+              </button>
+            </div>
+            <div style={{ marginTop: '0.5rem', textAlign: 'right' }}>
+              <Link
+                href="/"
+                style={{
+                  color: '#38bdf8',
+                  textDecoration: 'none',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                }}
+              >
+                Continue to app &rarr;
+              </Link>
+            </div>
           </div>
         )}
 

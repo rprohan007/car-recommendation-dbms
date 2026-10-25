@@ -11,12 +11,15 @@ export async function middleware(req: NextRequest) {
     const secret = process.env.NEXTAUTH_SECRET || 'car-recommendation-dbms-nextauth-super-secret-key-2026';
     const token = await getToken({ req, secret });
 
-    // Handle API routes protection (Return 401 / 403 JSON)
+    // Handle API routes protection (Return 403 Forbidden JSON)
     if (isAdminApi) {
       if (!token) {
         return NextResponse.json(
-          { success: false, error: 'Unauthorized: Please authenticate to access admin APIs' },
-          { status: 401 }
+          {
+            success: false,
+            error: 'Forbidden: Insufficient privileges. Authentication required.',
+          },
+          { status: 403 }
         );
       }
 
@@ -59,5 +62,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/admin/:path*', '/api/admin/:path*'],
+  matcher: ['/admin', '/admin/:path*', '/api/admin', '/api/admin/:path*'],
 };

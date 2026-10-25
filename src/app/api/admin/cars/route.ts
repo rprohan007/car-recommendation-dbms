@@ -1,14 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth';
 import { query, pool } from '@/lib/db';
 import { getEmbedding } from '@/lib/embeddings';
 
 export const dynamic = 'force-dynamic';
+
+async function verifyAdminAuth() {
+  const session = await getServerSession(authOptions);
+  if (!session || !session.user) {
+    return { authorized: false, error: 'Forbidden: Insufficient privileges. Authentication required.' };
+  }
+  const role = (session.user.role as string)?.toUpperCase();
+  if (role !== 'ADMIN') {
+    return { authorized: false, error: 'Forbidden: Insufficient privileges. ADMIN role required.' };
+  }
+  return { authorized: true, session };
+}
 
 /**
  * GET /api/admin/cars
  * Lists car variants with complete specifications for admin management
  */
 export async function GET(req: NextRequest) {
+  const auth = await verifyAdminAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50', 10), 1), 100);
@@ -97,6 +116,11 @@ export async function GET(req: NextRequest) {
  * Creates a new car variant with specifications and automatic vector embedding
  */
 export async function POST(req: NextRequest) {
+  const auth = await verifyAdminAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+  }
+
   const client = await pool.connect();
   try {
     const body = await req.json();
@@ -221,6 +245,11 @@ export async function POST(req: NextRequest) {
  * Updates specifications, pricing, or status of an existing car variant
  */
 export async function PUT(req: NextRequest) {
+  const auth = await verifyAdminAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+  }
+
   try {
     const body = await req.json();
     const { variantId, ...fieldsToUpdate } = body;
@@ -350,6 +379,11 @@ export async function PUT(req: NextRequest) {
  * Usage: DELETE /api/admin/cars?id=123 OR payload { variantId: 123, hardDelete: false }
  */
 export async function DELETE(req: NextRequest) {
+  const auth = await verifyAdminAuth();
+  if (!auth.authorized) {
+    return NextResponse.json({ success: false, error: auth.error }, { status: 403 });
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const queryId = searchParams.get('id');

@@ -25,11 +25,16 @@ RESTART IDENTITY CASCADE;
 -- ============================================================================
 -- 1. SEED: USERS
 -- ============================================================================
+-- Passwords for testing:
+-- Rohan Patel (customer): Customer@123
+-- Priya Sharma (customer): Customer@123
+-- Vikram Malhotra (admin): Admin@123
+-- Ananya Deshmukh (analyst): Analyst@123
 INSERT INTO users (full_name, email, password_hash, role, phone) VALUES
-('Rohan Patel', 'rohan.patel@example.com', '$2b$12$e8YnZ7P4mQq8vUeX1Y7f8e3LzB.1Gq3dJ5P.6h7J9k0L1m2N3o4P5', 'customer', '+919876543210'),
-('Priya Sharma', 'priya.sharma@example.com', '$2b$12$w9XmY6O3lPp7uTdX0X6e7d2KyA.0Fp2cI4O.5g6I8j9K0l1M2n3O4', 'customer', '+919812345678'),
-('Vikram Malhotra', 'vikram.admin@cardb.in', '$2b$12$a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8s9T0u1V2w3X4y5Z6a', 'admin', '+919900112233'),
-('Ananya Deshmukh', 'ananya.analyst@cardb.in', '$2b$12$b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2W3x4Y5z6A7b', 'analyst', '+919765432109');
+('Rohan Patel', 'rohan.patel@example.com', '$2b$10$69hMRnRVgMjzdFEIx2OXKO3ErotAeZ8WSjEE.IeGflE4flZvLy3ji', 'customer', '+919876543210'),
+('Priya Sharma', 'priya.sharma@example.com', '$2b$10$69hMRnRVgMjzdFEIx2OXKO3ErotAeZ8WSjEE.IeGflE4flZvLy3ji', 'customer', '+919812345678'),
+('Vikram Malhotra', 'vikram.admin@cardb.in', '$2b$10$JTzPsYe5CnkQKcCkN151ee3yAx/JCdRs0ZIj4fZVTVcptVGdUYaHy', 'admin', '+919900112233'),
+('Ananya Deshmukh', 'ananya.analyst@cardb.in', '$2b$10$ONxsp8fDTMVT9IOXJ.rjyOOjwbl73gxqAJZSSUhNP/ZjLic0z8sKe', 'analyst', '+919765432109');
 
 -- ============================================================================
 -- 2. SEED: MANUFACTURERS (Indian Automotive Market)
