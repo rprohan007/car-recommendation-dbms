@@ -8,14 +8,14 @@ Designed and engineered for a **50-Mark Academic DBMS University Project Evaluat
 
 ## 📑 Evaluation Deliverables & Documentation Index
 
-All academic deliverables required for project evaluation and viva examination are organized in [`docs/`](file:///Users/rujuljain/car-recommendation-dbms/docs/):
+All academic deliverables required for project evaluation and viva examination are organized in [`docs/`](docs/):
 
-* 📊 **[ER Diagram & Relational Schema Architecture](file:///Users/rujuljain/car-recommendation-dbms/docs/er_diagram.md)**: Formal Mermaid entity-relationship diagram with keys, cardinalities, check constraints, and junction table documentation.
-* 🏛️ **[Technology Justification & Architectural Rationale](file:///Users/rujuljain/car-recommendation-dbms/docs/technology_justification.md)**: Academic comparative analysis justifying PostgreSQL + pgvector over MongoDB, Pinecone, and traditional SQL.
-* 🎓 **[SQL Viva & Examination Demonstration Guide](file:///Users/rujuljain/car-recommendation-dbms/docs/sql_demonstration_guide.md)**: Step-by-step viva script with exact SQL commands for DML, 5-table JOINs, subqueries, recursive CTEs, triggers, and vector search.
-* 🧪 **[Automated Testing & Security QA Report](file:///Users/rujuljain/car-recommendation-dbms/docs/test_report.md)**: Automated test execution log (12/12 passed), RBAC matrix, and Next.js production build output.
-* ✅ **[50-Mark Demonstration Checklist](file:///Users/rujuljain/car-recommendation-dbms/docs/demonstration_checklist.md)**: Complete mapping of all 50 rubric marks to specific files and line numbers.
-* 👥 **[Team Member Contribution Template](file:///Users/rujuljain/car-recommendation-dbms/docs/team_contribution_template.md)**: Work breakdown form for academic project submission.
+* 📊 **[ER Diagram & Relational Schema Architecture](docs/er_diagram.md)**: Formal Mermaid entity-relationship diagram with keys, cardinalities, check constraints, and junction table documentation.
+* 🏛️ **[Technology Justification & Architectural Rationale](docs/technology_justification.md)**: Academic comparative analysis justifying PostgreSQL + pgvector over MongoDB, Pinecone, and traditional SQL.
+* 🎓 **[SQL Viva & Examination Demonstration Guide](docs/sql_demonstration_guide.md)**: Step-by-step viva script with exact SQL commands for DML, 5-table JOINs, subqueries, recursive CTEs, triggers, and vector search.
+* 🧪 **[Automated Testing & Security QA Report](docs/test_report.md)**: Automated test execution log (12/12 passed), RBAC matrix, and Next.js production build output.
+* ✅ **[50-Mark Demonstration Checklist](docs/demonstration_checklist.md)**: Complete mapping of all 50 rubric marks to specific files and line numbers.
+* 👥 **[Team Member Contribution Template](docs/team_contribution_template.md)**: Work breakdown form for academic project submission.
 
 ---
 
@@ -95,7 +95,7 @@ NODE_ENV=development
 
 ## 🗄️ Database Setup & Initialization
 
-All SQL scripts are located in [`database/`](file:///Users/rujuljain/car-recommendation-dbms/database/) and are designed to be safe and reproducible.
+All SQL scripts are located in [`database/`](database/) and are designed to be safe and reproducible.
 
 ### 1. Create Database & Enable Extension
 ```bash

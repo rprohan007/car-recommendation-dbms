@@ -59,12 +59,11 @@ LIMIT 5;
 \echo '\n--- 1.3 DML UPDATE: Safe In-Place Modification with Check Constraints ---'
 -- Demonstrates price revision and check constraint enforcement
 UPDATE car_variants
-SET 
+SET
     ex_showroom_price = 1249000.00,
-    mileage_kmpl = 17.50,
-    updated_at = CURRENT_TIMESTAMP
+    mileage_kmpl = 17.50
 WHERE variant_name = 'Demonstration Spec 1.2 Turbo AT'
-RETURNING variant_id, variant_name, ex_showroom_price, mileage_kmpl, updated_at;
+RETURNING variant_id, variant_name, ex_showroom_price, mileage_kmpl;
 
 \echo '\n--- 1.4 DML DELETE: Safe Deletion of Disposable Test Record ---'
 DELETE FROM car_variants
@@ -167,7 +166,7 @@ WITH RECURSIVE budget_ladder AS (
     SELECT 
         bl.tier_level + 1,
         (bl.tier_max_price + 1.00)::NUMERIC(12,2),
-        ROUND((bl.tier_max_price * 1.50)::NUMERIC, 2),
+        ROUND((bl.tier_max_price * 1.50)::NUMERIC, 2)::NUMERIC(12,2),
         CASE 
             WHEN bl.tier_level + 1 = 2 THEN 'Mid-Range Value'
             WHEN bl.tier_level + 1 = 3 THEN 'Premium Executive'
@@ -219,46 +218,50 @@ LIMIT 10;
 -- [Rubric: Stored Procedures / Functions & Triggers]
 -- ============================================================================
 
-\echo '\n--- 4.1 Stored Function: fn_search_cars Semantic & Multi-Factor Matching ---'
-SELECT 
+\echo '\n--- 4.1 Stored Function: recommend_cars_fn Multi-Attribute Matching ---'
+SELECT
     variant_id,
-    brand_name,
+    manufacturer_name,
     model_name,
     variant_name,
     body_type,
-    fuel_type,
     ex_showroom_price,
-    safety_rating,
-    ROUND(composite_score::NUMERIC, 4) AS composite_relevance_score
-FROM fn_search_cars(
-    p_min_price := 800000.00,
-    p_max_price := 2500000.00,
-    p_fuel_type := 'Petrol',
+    fuel_type,
+    transmission,
+    safety_rating_ncap,
+    mileage_kmpl,
+    standard_features
+FROM recommend_cars_fn(
+    p_min_budget := 800000.00,
+    p_max_budget := 2500000.00,
+    p_fuel := 'Petrol'::fuel_enum,
     p_transmission := NULL,
     p_min_safety := 4.0,
     p_limit := 3
 );
 
 \echo '\n--- 4.2 Stored Procedure: sp_bulk_adjust_pricing (Transactional Batch DML) ---'
--- Demonstrates atomic stored procedure modifying pricing across a manufacturer
-CALL sp_bulk_adjust_pricing(
-    p_manufacturer_name := 'Tata Motors',
-    p_percentage_delta := 1.50,
-    p_reason := 'Academic Viva DML Demonstration - Inflation Adjustment'
-);
+-- Resolve the manufacturer ID before beginning the demonstration transaction.
+SELECT manufacturer_id AS demo_manufacturer_id
+FROM manufacturers
+WHERE name = 'Tata Motors'
+LIMIT 1
+\gset
 
--- Revert the adjustment immediately to preserve pristine seed data
+-- Demonstrate the pricing adjustment, then roll it back to preserve seed data.
+BEGIN;
 CALL sp_bulk_adjust_pricing(
-    p_manufacturer_name := 'Tata Motors',
-    p_percentage_delta := -1.47783,
-    p_reason := 'Revert Academic Viva Demonstration'
+    p_manufacturer_id := :demo_manufacturer_id,
+    p_percentage_change := 1.50,
+    p_updated_count := 0
 );
+ROLLBACK;
 
 \echo '\n--- 4.3 Trigger Verification: trg_log_search Automation ---'
 -- Insert a record into user_search_requests to trigger trg_log_search
 INSERT INTO user_search_requests (
     user_id, min_budget, max_budget, preferred_fuel, preferred_transmission,
-    preferred_body_type, min_safety_rating, raw_search_query
+    preferred_body_type, min_safety_rating, search_query
 ) VALUES (
     (SELECT user_id FROM users WHERE email = 'rohan.patel@example.com' LIMIT 1),
     1200000.00,
@@ -278,11 +281,11 @@ SELECT
     max_budget,
     preferred_fuel,
     preferred_transmission,
-    raw_search_query,
-    searched_at
+    search_query,
+    search_timestamp
 FROM customer_searches
-WHERE raw_search_query LIKE 'Viva Audit%'
-ORDER BY searched_at DESC
+WHERE search_query LIKE 'Viva Audit%'
+ORDER BY search_timestamp DESC
 LIMIT 1;
 
 
@@ -350,12 +353,11 @@ LIMIT 3;
 
 \echo '\n--- 5.4 Vector UPDATE: Re-indexing After Vehicle Spec Alteration ---'
 UPDATE car_variants
-SET 
+SET
     ex_showroom_price = 1949000.00,
-    embedding = fn_generate_mock_vector(999, 1.949),
-    updated_at = CURRENT_TIMESTAMP
+    embedding = fn_generate_mock_vector(999, 1.949)
 WHERE variant_name = 'Empowered Plus 55 Viva Edition'
-RETURNING variant_id, variant_name, ex_showroom_price, updated_at;
+RETURNING variant_id, variant_name, ex_showroom_price;
 
 \echo '\n--- 5.5 Vector DELETE: Cascade and Clean Removal of Vector Record ---'
 DELETE FROM car_variants
