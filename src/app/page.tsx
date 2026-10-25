@@ -73,7 +73,12 @@ export default function RecommendationPortal() {
 
   // Results & Loading
   const [cars, setCars] = useState<CarResult[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  // Maintain backward-compatible aliases
+  const loading = isLoading;
+  const setLoading = setIsLoading;
+
   const [isPending, startTransition] = useTransition();
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(true);
@@ -89,7 +94,8 @@ export default function RecommendationPortal() {
   const [tenureMonths, setTenureMonths] = useState<number>(60);
 
   const fetchRecommendations = async (overrideDemo = demoMode) => {
-    setLoading(true);
+    setIsLoading(true);
+    setError(null);
     try {
       const payload: any = {
         prompt: prompt.trim(),
@@ -109,22 +115,40 @@ export default function RecommendationPortal() {
         body: JSON.stringify(payload),
       });
 
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        const errMsg = errJson.error || errJson.message || `API error occurred (HTTP ${res.status})`;
+        setError(errMsg);
+        if (res.status === 503 || errJson.code === 'DATABASE_UNAVAILABLE') {
+          setDbUnavailable(true);
+        }
+        setCars([]);
+        return;
+      }
+
       const data = await res.json();
-      if (res.status === 503 || data.code === 'DATABASE_UNAVAILABLE') {
+      if (data.code === 'DATABASE_UNAVAILABLE') {
         setDbUnavailable(true);
+        setError(data.error || 'Live PostgreSQL database is unreachable.');
         setCars([]);
       } else if (data.success && Array.isArray(data.data)) {
         setCars(data.data);
         setDbUnavailable(false);
+        setError(null);
       } else {
         setCars([]);
+        if (data.error) {
+          setError(data.error);
+        }
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch recommendations:', err);
+      const message = err?.message || 'Failed to communicate with recommendation engine. Please check network/database connectivity.';
+      setError(message);
       setDbUnavailable(true);
       setCars([]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
       setHasSearched(true);
     }
   };
@@ -242,6 +266,27 @@ export default function RecommendationPortal() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Dynamic Error State Warning Banner */}
+        {error && !dbUnavailable && (
+          <div className="mb-8 p-4 sm:p-5 bg-rose-500/10 border border-rose-500/30 rounded-2xl backdrop-blur-md animate-in fade-in flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 bg-rose-500/20 text-rose-400 rounded-xl shrink-0 mt-0.5">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-rose-300">Recommendation Query Notice</h4>
+                <p className="text-xs text-slate-300 mt-1 leading-relaxed">{error}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => fetchRecommendations(false)}
+              className="text-xs font-semibold bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40 px-4 py-2 rounded-xl transition shrink-0 self-end sm:self-center"
+            >
+              Retry Search
+            </button>
           </div>
         )}
 

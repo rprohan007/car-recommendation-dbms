@@ -211,8 +211,7 @@ export async function POST(req: NextRequest) {
         cv.torque_nm,
         cv.mileage_kmpl,
         cv.safety_rating_ncap,
-        cm.seating_capacity,
-        cv.embedding
+        cm.seating_capacity
       ORDER BY
         combined_relevance_score DESC,
         cv.safety_rating_ncap DESC NULLS LAST,

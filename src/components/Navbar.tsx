@@ -83,8 +83,9 @@ export default function Navbar() {
           {/* Desktop Auth / User Controls */}
           <div className="hidden md:flex items-center gap-3">
             {status === 'loading' ? (
-              <div className="text-xs text-slate-500 animate-pulse px-3 py-1">
-                Verifying session...
+              <div className="flex items-center gap-2">
+                <div className="w-16 h-8 bg-slate-800/60 rounded-lg animate-pulse" />
+                <div className="w-20 h-8 bg-sky-500/20 rounded-lg animate-pulse" />
               </div>
             ) : session ? (
               <div className="flex items-center gap-3">
@@ -181,11 +182,22 @@ export default function Navbar() {
           </div>
 
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-            {session ? (
+            {status === 'loading' ? (
+              <div className="flex items-center gap-2 w-full">
+                <div className="flex-1 h-8 bg-slate-800/60 rounded-lg animate-pulse" />
+                <div className="flex-1 h-8 bg-sky-500/20 rounded-lg animate-pulse" />
+              </div>
+            ) : session ? (
               <div className="flex items-center justify-between w-full">
                 <div>
                   <div className="text-xs font-semibold text-slate-200">{user?.name || user?.email}</div>
-                  <span className="text-[10px] text-sky-400 uppercase font-bold">{user?.role || 'CUSTOMER'}</span>
+                  <span
+                    className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                      isAdmin ? 'bg-rose-500/20 text-rose-400' : 'bg-sky-500/20 text-sky-400'
+                    }`}
+                  >
+                    {userRole}
+                  </span>
                 </div>
                 <button
                   onClick={() => signOut({ callbackUrl: '/login' })}
