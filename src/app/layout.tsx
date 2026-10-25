@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import './globals.css';
 import AuthProvider from '@/components/AuthProvider';
 import Navbar from '@/components/Navbar';
 
@@ -13,8 +14,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body style={{ margin: 0, fontFamily: 'system-ui, -apple-system, sans-serif', backgroundColor: '#090d16', color: '#f8fafc' }}>
+    <html lang="en" className="dark">
+      <body className="min-h-screen bg-[#090d16] text-slate-100 antialiased selection:bg-sky-500 selection:text-white">
         <AuthProvider>
           <Navbar />
           {children}

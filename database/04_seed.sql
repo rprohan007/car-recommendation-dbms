@@ -4,37 +4,48 @@
 -- Database Engine: PostgreSQL 14+ with pgvector
 -- ============================================================================
 
--- Clean existing seed data
+-- Safely clean existing seed data if tables exist
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'user_search_requests') THEN
         EXECUTE 'TRUNCATE TABLE user_search_requests RESTART IDENTITY CASCADE;';
     END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'customer_searches') THEN
+        EXECUTE 'TRUNCATE TABLE customer_searches RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'variant_features') THEN
+        EXECUTE 'TRUNCATE TABLE variant_features RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'features') THEN
+        EXECUTE 'TRUNCATE TABLE features RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'car_variants') THEN
+        EXECUTE 'TRUNCATE TABLE car_variants RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'car_models') THEN
+        EXECUTE 'TRUNCATE TABLE car_models RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'manufacturers') THEN
+        EXECUTE 'TRUNCATE TABLE manufacturers RESTART IDENTITY CASCADE;';
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'users') THEN
+        EXECUTE 'TRUNCATE TABLE users RESTART IDENTITY CASCADE;';
+    END IF;
 END $$;
 
-TRUNCATE TABLE 
-    customer_searches,
-    variant_features,
-    features,
-    car_variants,
-    car_models,
-    manufacturers,
-    users
-RESTART IDENTITY CASCADE;
-
 -- ============================================================================
--- 1. SEED: USERS
+-- 1. SEED: USERS (Authentic 12-round bcrypt hashes for academic evaluation)
+-- Passwords:
+--   Admin:    vikram.admin@cardb.in    -> Admin@123
+--   Customer: rohan.patel@example.com  -> Customer@123
+--   Customer: priya.sharma@example.com -> Customer@123
+--   Analyst:  ananya.analyst@cardb.in  -> Analyst@123
 -- ============================================================================
--- Passwords for testing:
--- Rohan Patel (customer): Customer@123
--- Priya Sharma (customer): Customer@123
--- Vikram Malhotra (admin): Admin@123
--- Ananya Deshmukh (analyst): Analyst@123
 INSERT INTO users (full_name, email, password_hash, role, phone) VALUES
-('Rohan Patel', 'rohan.patel@example.com', '$2b$10$69hMRnRVgMjzdFEIx2OXKO3ErotAeZ8WSjEE.IeGflE4flZvLy3ji', 'customer', '+919876543210'),
-('Priya Sharma', 'priya.sharma@example.com', '$2b$10$69hMRnRVgMjzdFEIx2OXKO3ErotAeZ8WSjEE.IeGflE4flZvLy3ji', 'customer', '+919812345678'),
-('Vikram Malhotra', 'vikram.admin@cardb.in', '$2b$10$JTzPsYe5CnkQKcCkN151ee3yAx/JCdRs0ZIj4fZVTVcptVGdUYaHy', 'admin', '+919900112233'),
-('Ananya Deshmukh', 'ananya.analyst@cardb.in', '$2b$10$ONxsp8fDTMVT9IOXJ.rjyOOjwbl73gxqAJZSSUhNP/ZjLic0z8sKe', 'analyst', '+919765432109');
+('Rohan Patel', 'rohan.patel@example.com', '$2b$12$tgaEekL31HxertPPzcMrkOQHL0p12SmqZEAmC/cm8leTAlphxnXDe', 'customer', '+919876543210'),
+('Priya Sharma', 'priya.sharma@example.com', '$2b$12$tgaEekL31HxertPPzcMrkOQHL0p12SmqZEAmC/cm8leTAlphxnXDe', 'customer', '+919812345678'),
+('Vikram Malhotra', 'vikram.admin@cardb.in', '$2b$12$hPKXJeSSd4NM5WB9teM59e0pmnPE70rmo1WVZ7MfQ.IfwEH7AuDOS', 'admin', '+919900112233'),
+('Ananya Deshmukh', 'ananya.analyst@cardb.in', '$2b$12$5u0gzuzxr9Ao2mxUE7rb2.wNDkaAJjjrrOPHNTUuViBgeH420GeSq', 'analyst', '+919765432109');
 
 -- ============================================================================
 -- 2. SEED: MANUFACTURERS (Indian Automotive Market)

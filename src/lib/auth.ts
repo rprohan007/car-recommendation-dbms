@@ -2,6 +2,9 @@ import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { query } from '@/lib/db';
+import { getAppEnv } from '@/lib/env';
+
+const env = getAppEnv();
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,44 +15,56 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Strict input presence check
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Please enter both email and password');
+          throw new Error('Invalid email or password');
         }
 
         const normalizedEmail = credentials.email.trim().toLowerCase();
 
-        // Parameterized SQL query looking up user from PostgreSQL
-        const sql = `
-          SELECT user_id, full_name, email, password_hash, role
-          FROM users
-          WHERE LOWER(email) = $1
-          LIMIT 1;
-        `;
+        // Parameterized SQL query: looks up user strictly from PostgreSQL users table
+        try {
+          const sql = `
+            SELECT user_id, full_name, email, password_hash, role
+            FROM users
+            WHERE LOWER(email) = $1
+            LIMIT 1;
+          `;
 
-        const result = await query(sql, [normalizedEmail]);
-        const user = result.rows[0];
+          const result = await query(sql, [normalizedEmail]);
+          const user = result.rows[0];
 
-        if (!user) {
-          throw new Error('No user found with this email address');
+          if (!user || !user.password_hash) {
+            // Generic error message to prevent user enumeration
+            throw new Error('Invalid email or password');
+          }
+
+          // Cryptographic verification against stored bcrypt hash ONLY
+          const isValidPassword = await bcrypt.compare(credentials.password, user.password_hash);
+          if (!isValidPassword) {
+            throw new Error('Invalid email or password');
+          }
+
+          // Normalize role strictly to uppercase
+          const role = (user.role || 'customer').toString().toUpperCase();
+
+          return {
+            id: user.user_id.toString(),
+            user_id: user.user_id,
+            userId: user.user_id,
+            name: user.full_name,
+            email: user.email,
+            role,
+          };
+        } catch (dbError: any) {
+          // If error is already our generic invalid credentials error, rethrow it
+          if (dbError.message === 'Invalid email or password') {
+            throw dbError;
+          }
+          // Security: Fail closed on database outage or connection error. Never bypass auth.
+          console.error('[SECURITY AUDIT] Authentication database query failed:', dbError?.message);
+          throw new Error('Authentication service temporarily unavailable. Please verify database connectivity.');
         }
-
-        // Verify password hash with bcryptjs
-        const isValidPassword = await bcrypt.compare(credentials.password, user.password_hash);
-        if (!isValidPassword) {
-          throw new Error('Invalid password');
-        }
-
-        // Normalize role to uppercase for RBAC comparison
-        const role = (user.role || 'customer').toString().toUpperCase();
-
-        return {
-          id: user.user_id.toString(),
-          user_id: user.user_id,
-          userId: user.user_id,
-          name: user.full_name,
-          email: user.email,
-          role,
-        };
       },
     }),
   ],
@@ -79,5 +94,5 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: '/login',
   },
-  secret: process.env.NEXTAUTH_SECRET || 'car-recommendation-dbms-nextauth-super-secret-key-2026',
+  secret: env.NEXTAUTH_SECRET,
 };

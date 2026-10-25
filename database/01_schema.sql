@@ -1,70 +1,49 @@
 -- ============================================================================
 -- File: database/01_schema.sql
--- Description: Core Schema DDL for Car Recommendation Database Management System
+-- Description: Safe & Idempotent Schema DDL for Car Recommendation DBMS
 -- Database Engine: PostgreSQL 14+
+-- Safety Guarantee: Never drops tables or destroys existing user data.
+-- To perform a complete development wipe, run database/00_reset_dev_only.sql.
 -- ============================================================================
 
--- Clean up existing tables and types (in reverse dependency order)
-DROP TABLE IF EXISTS variant_features CASCADE;
-DROP TABLE IF EXISTS features CASCADE;
-DROP TABLE IF EXISTS customer_searches CASCADE;
-DROP TABLE IF EXISTS car_variants CASCADE;
-DROP TABLE IF EXISTS car_models CASCADE;
-DROP TABLE IF EXISTS manufacturers CASCADE;
-DROP TABLE IF EXISTS users CASCADE;
-
-DROP TYPE IF EXISTS user_role CASCADE;
-DROP TYPE IF EXISTS body_type CASCADE;
-DROP TYPE IF EXISTS launch_status CASCADE;
-DROP TYPE IF EXISTS fuel_enum CASCADE;
-DROP TYPE IF EXISTS trans_enum CASCADE;
-
 -- ============================================================================
--- 1. ENUM TYPES
+-- 1. ENUM TYPES (Idempotent Creation)
 -- ============================================================================
 
 -- User roles within the recommendation platform
-CREATE TYPE user_role AS ENUM (
-    'customer',
-    'admin',
-    'dealer',
-    'analyst'
-);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+        CREATE TYPE user_role AS ENUM ('customer', 'admin', 'dealer', 'analyst');
+    END IF;
+END $$;
 
 -- Common automotive body styles
-CREATE TYPE body_type AS ENUM (
-    'SUV',
-    'Sedan',
-    'Hatchback',
-    'MUV',
-    'Coupe',
-    'Convertible'
-);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'body_type') THEN
+        CREATE TYPE body_type AS ENUM ('SUV', 'Sedan', 'Hatchback', 'MUV', 'Coupe', 'Convertible');
+    END IF;
+END $$;
 
 -- Market launch lifecycle status
-CREATE TYPE launch_status AS ENUM (
-    'upcoming',
-    'launched',
-    'discontinued'
-);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'launch_status') THEN
+        CREATE TYPE launch_status AS ENUM ('upcoming', 'launched', 'discontinued');
+    END IF;
+END $$;
 
 -- Fuel / Powertrain classification
-CREATE TYPE fuel_enum AS ENUM (
-    'Petrol',
-    'Diesel',
-    'Electric',
-    'Hybrid',
-    'CNG'
-);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'fuel_enum') THEN
+        CREATE TYPE fuel_enum AS ENUM ('Petrol', 'Diesel', 'Electric', 'Hybrid', 'CNG');
+    END IF;
+END $$;
 
 -- Transmission mechanism types
-CREATE TYPE trans_enum AS ENUM (
-    'Manual',
-    'Automatic',
-    'AMT',
-    'CVT',
-    'DCT'
-);
+DO $$ BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trans_enum') THEN
+        CREATE TYPE trans_enum AS ENUM ('Manual', 'Automatic', 'AMT', 'CVT', 'DCT');
+    END IF;
+END $$;
 
 -- ============================================================================
 -- 2. TABLE DEFINITIONS
@@ -72,9 +51,9 @@ CREATE TYPE trans_enum AS ENUM (
 
 -- ----------------------------------------------------------------------------
 -- Table: users
--- Stores end-users, dealership representatives, and system administrators
+-- Stores end-users, dealership representatives, analysts, and administrators
 -- ----------------------------------------------------------------------------
-CREATE TABLE users (
+CREATE TABLE IF NOT EXISTS users (
     user_id SERIAL PRIMARY KEY,
     full_name VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL,
@@ -92,7 +71,7 @@ CREATE TABLE users (
 -- Table: manufacturers
 -- Automotive original equipment manufacturers (OEMs)
 -- ----------------------------------------------------------------------------
-CREATE TABLE manufacturers (
+CREATE TABLE IF NOT EXISTS manufacturers (
     manufacturer_id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
     country_origin VARCHAR(100) NOT NULL DEFAULT 'India',
@@ -106,7 +85,7 @@ CREATE TABLE manufacturers (
 -- Table: car_models
 -- Specific vehicle model lines under each manufacturer
 -- ----------------------------------------------------------------------------
-CREATE TABLE car_models (
+CREATE TABLE IF NOT EXISTS car_models (
     model_id SERIAL PRIMARY KEY,
     manufacturer_id INT NOT NULL,
     model_name VARCHAR(100) NOT NULL,
@@ -116,23 +95,23 @@ CREATE TABLE car_models (
     seating_capacity INT NOT NULL DEFAULT 5,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_car_models_manufacturer 
-        FOREIGN KEY (manufacturer_id) 
-        REFERENCES manufacturers(manufacturer_id) 
+    CONSTRAINT fk_car_models_manufacturer
+        FOREIGN KEY (manufacturer_id)
+        REFERENCES manufacturers(manufacturer_id)
         ON DELETE CASCADE,
 
-    CONSTRAINT uq_manufacturer_model 
+    CONSTRAINT uq_manufacturer_model
         UNIQUE (manufacturer_id, model_name),
 
-    CONSTRAINT chk_seating_capacity 
+    CONSTRAINT chk_seating_capacity
         CHECK (seating_capacity >= 2 AND seating_capacity <= 16)
 );
 
 -- ----------------------------------------------------------------------------
 -- Table: car_variants
--- Trims / variants for each model with specific engine, transmission, and pricing
+-- Trims / variants for each model with engine specs, transmission, and pricing
 -- ----------------------------------------------------------------------------
-CREATE TABLE car_variants (
+CREATE TABLE IF NOT EXISTS car_variants (
     variant_id SERIAL PRIMARY KEY,
     model_id INT NOT NULL,
     variant_name VARCHAR(100) NOT NULL,
@@ -147,30 +126,30 @@ CREATE TABLE car_variants (
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_car_variants_model 
-        FOREIGN KEY (model_id) 
-        REFERENCES car_models(model_id) 
+    CONSTRAINT fk_car_variants_model
+        FOREIGN KEY (model_id)
+        REFERENCES car_models(model_id)
         ON DELETE CASCADE,
 
-    CONSTRAINT uq_model_variant 
+    CONSTRAINT uq_model_variant
         UNIQUE (model_id, variant_name),
 
-    CONSTRAINT chk_price_positive 
+    CONSTRAINT chk_price_positive
         CHECK (ex_showroom_price > 0),
 
-    CONSTRAINT chk_safety_rating_range 
+    CONSTRAINT chk_safety_rating_range
         CHECK (safety_rating_ncap IS NULL OR (safety_rating_ncap >= 0.0 AND safety_rating_ncap <= 5.0)),
 
-    CONSTRAINT chk_engine_cc 
+    CONSTRAINT chk_engine_cc
         CHECK (engine_displacement_cc IS NULL OR engine_displacement_cc >= 0),
 
-    CONSTRAINT chk_power_positive 
+    CONSTRAINT chk_power_positive
         CHECK (power_bhp IS NULL OR power_bhp > 0),
 
-    CONSTRAINT chk_torque_positive 
+    CONSTRAINT chk_torque_positive
         CHECK (torque_nm IS NULL OR torque_nm > 0),
 
-    CONSTRAINT chk_mileage_positive 
+    CONSTRAINT chk_mileage_positive
         CHECK (mileage_kmpl IS NULL OR mileage_kmpl >= 0)
 );
 
@@ -178,7 +157,7 @@ CREATE TABLE car_variants (
 -- Table: features
 -- Master catalog of vehicle features (Safety, Infotainment, Comfort, etc.)
 -- ----------------------------------------------------------------------------
-CREATE TABLE features (
+CREATE TABLE IF NOT EXISTS features (
     feature_id SERIAL PRIMARY KEY,
     feature_name VARCHAR(100) NOT NULL,
     category VARCHAR(50) NOT NULL,
@@ -194,22 +173,22 @@ CREATE TABLE features (
 -- Table: variant_features
 -- Junction table mapping features to specific car variants
 -- ----------------------------------------------------------------------------
-CREATE TABLE variant_features (
+CREATE TABLE IF NOT EXISTS variant_features (
     variant_id INT NOT NULL,
     feature_id INT NOT NULL,
     is_standard BOOLEAN NOT NULL DEFAULT TRUE,
 
-    CONSTRAINT pk_variant_features 
+    CONSTRAINT pk_variant_features
         PRIMARY KEY (variant_id, feature_id),
 
-    CONSTRAINT fk_variant_features_variant 
-        FOREIGN KEY (variant_id) 
-        REFERENCES car_variants(variant_id) 
+    CONSTRAINT fk_variant_features_variant
+        FOREIGN KEY (variant_id)
+        REFERENCES car_variants(variant_id)
         ON DELETE CASCADE,
 
-    CONSTRAINT fk_variant_features_feature 
-        FOREIGN KEY (feature_id) 
-        REFERENCES features(feature_id) 
+    CONSTRAINT fk_variant_features_feature
+        FOREIGN KEY (feature_id)
+        REFERENCES features(feature_id)
         ON DELETE CASCADE
 );
 
@@ -217,7 +196,7 @@ CREATE TABLE variant_features (
 -- Table: customer_searches
 -- Audit trail and tracking of user search criteria & preferences
 -- ----------------------------------------------------------------------------
-CREATE TABLE customer_searches (
+CREATE TABLE IF NOT EXISTS customer_searches (
     search_id BIGSERIAL PRIMARY KEY,
     user_id INT,
     min_budget NUMERIC(12, 2),
@@ -229,65 +208,68 @@ CREATE TABLE customer_searches (
     search_query TEXT,
     search_timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    CONSTRAINT fk_customer_searches_user 
-        FOREIGN KEY (user_id) 
-        REFERENCES users(user_id) 
+    CONSTRAINT fk_customer_searches_user
+        FOREIGN KEY (user_id)
+        REFERENCES users(user_id)
         ON DELETE SET NULL,
 
-    CONSTRAINT chk_min_budget_non_negative 
+    CONSTRAINT chk_min_budget_non_negative
         CHECK (min_budget IS NULL OR min_budget >= 0),
 
-    CONSTRAINT chk_max_budget_non_negative 
+    CONSTRAINT chk_max_budget_non_negative
         CHECK (max_budget IS NULL OR max_budget >= 0),
 
-    CONSTRAINT chk_budget_consistency 
+    CONSTRAINT chk_budget_consistency
         CHECK (min_budget IS NULL OR max_budget IS NULL OR max_budget >= min_budget),
 
-    CONSTRAINT chk_search_safety_rating 
+    CONSTRAINT chk_search_safety_rating
         CHECK (min_safety_rating IS NULL OR (min_safety_rating >= 0.0 AND min_safety_rating <= 5.0))
 );
 
 -- ============================================================================
--- 3. B-TREE INDEXES FOR SEARCH OPTIMIZATION
+-- 3. B-TREE INDEXES FOR QUERY & JOIN OPTIMIZATION
 -- ============================================================================
 
--- Indexes on car_models
-CREATE INDEX idx_car_models_manufacturer_id 
+-- Foreign-key and filtering indexes on car_models
+CREATE INDEX IF NOT EXISTS idx_car_models_manufacturer_id
     ON car_models(manufacturer_id);
 
-CREATE INDEX idx_car_models_body_type 
+CREATE INDEX IF NOT EXISTS idx_car_models_body_type
     ON car_models(body_type);
 
-CREATE INDEX idx_car_models_launch_status 
+CREATE INDEX IF NOT EXISTS idx_car_models_launch_status
     ON car_models(launch_status);
 
--- Indexes on car_variants for multi-attribute filtering
-CREATE INDEX idx_car_variants_model_id 
+-- Foreign-key and filtering indexes on car_variants
+CREATE INDEX IF NOT EXISTS idx_car_variants_model_id
     ON car_variants(model_id);
 
-CREATE INDEX idx_car_variants_price 
+CREATE INDEX IF NOT EXISTS idx_car_variants_price
     ON car_variants(ex_showroom_price);
 
-CREATE INDEX idx_car_variants_fuel 
+CREATE INDEX IF NOT EXISTS idx_car_variants_fuel
     ON car_variants(fuel_type);
 
-CREATE INDEX idx_car_variants_trans 
+CREATE INDEX IF NOT EXISTS idx_car_variants_trans
     ON car_variants(transmission);
 
-CREATE INDEX idx_car_variants_safety 
+CREATE INDEX IF NOT EXISTS idx_car_variants_safety
     ON car_variants(safety_rating_ncap);
 
--- Composite B-Tree index for common car search queries (Fuel + Transmission + Price)
-CREATE INDEX idx_car_variants_filter_comp 
-    ON car_variants(fuel_type, transmission, ex_showroom_price);
+-- Composite B-Tree index for common multi-attribute car search queries
+CREATE INDEX IF NOT EXISTS idx_car_variants_filter_comp
+    ON car_variants(is_active, fuel_type, transmission, ex_showroom_price);
 
--- Indexes on variant_features
-CREATE INDEX idx_variant_features_feature_id 
+-- Foreign-key indexes on variant_features junction table
+CREATE INDEX IF NOT EXISTS idx_variant_features_variant_id
+    ON variant_features(variant_id);
+
+CREATE INDEX IF NOT EXISTS idx_variant_features_feature_id
     ON variant_features(feature_id);
 
--- Indexes on customer_searches for user lookup and time-series analytics
-CREATE INDEX idx_customer_searches_user_id 
+-- Foreign-key and time-series indexes on customer_searches
+CREATE INDEX IF NOT EXISTS idx_customer_searches_user_id
     ON customer_searches(user_id);
 
-CREATE INDEX idx_customer_searches_timestamp 
+CREATE INDEX IF NOT EXISTS idx_customer_searches_timestamp
     ON customer_searches(search_timestamp DESC);
