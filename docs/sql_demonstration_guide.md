@@ -4,7 +4,7 @@
 **Engine**: PostgreSQL 14+ with `pgvector`  
 **Target**: 50/50 Marks Viva Demonstration  
 
-This guide provides the exact queries, terminal commands, and explanations to present to your project examiner. All queries are pre-compiled and runnable from [`database/05_demonstration.sql`](file:///Users/rujuljain/car-recommendation-dbms/database/05_demonstration.sql).
+This guide provides the exact queries, terminal commands, and explanations to present to your project examiner. All queries are pre-compiled and runnable from [`database/05_demonstration.sql`](../database/05_demonstration.sql).
 
 ---
 
@@ -16,7 +16,7 @@ To run the complete demonstration suite interactively in `psql`:
 psql -U postgres -d car_dbms -f database/05_demonstration.sql
 ```
 
-Alternatively, open `pgAdmin 4` or any PostgreSQL client, open [`database/05_demonstration.sql`](file:///Users/rujuljain/car-recommendation-dbms/database/05_demonstration.sql), and execute section by section.
+Alternatively, open `pgAdmin 4` or any PostgreSQL client, open [`database/05_demonstration.sql`](../database/05_demonstration.sql), and execute section by section.
 
 ---
 

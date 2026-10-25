@@ -2,28 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getEmbedding } from '@/lib/embeddings';
 import { SEED_VARIANTS } from '@/lib/seed-data';
+import { RecommendationQuerySchema, extractSearchTokens } from '@/lib/validations';
 
 export const dynamic = 'force-dynamic';
 
-interface RecommendRequestBody {
-  prompt?: string;
-  minPrice?: number | string;
-  maxPrice?: number | string;
-  fuelType?: string;
-  transmission?: string;
-  bodyType?: string;
-  minSafety?: number | string;
-  limit?: number | string;
-}
-
-const VALID_FUEL_TYPES = ['Petrol', 'Diesel', 'Electric', 'Hybrid', 'CNG'];
-const VALID_TRANSMISSIONS = ['Manual', 'Automatic', 'AMT', 'CVT', 'DCT'];
-const VALID_BODY_TYPES = ['SUV', 'Sedan', 'Hatchback', 'MUV', 'Coupe', 'Convertible'];
-
 export async function POST(req: NextRequest) {
-  let body: RecommendRequestBody = {};
+  let rawBody: any = {};
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json(
       { success: false, error: 'Invalid JSON payload in request body' },
@@ -31,64 +17,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Zod Runtime Input Validation
+  const parseResult = RecommendationQuerySchema.safeParse(rawBody);
+  if (!parseResult.success) {
+    const firstError = parseResult.error.issues?.[0]?.message || 'Invalid recommendation query parameters';
+    return NextResponse.json(
+      { success: false, error: firstError, errors: parseResult.error.flatten() },
+      { status: 400 }
+    );
+  }
+
   const {
-    prompt = '',
-    minPrice,
-    maxPrice,
-    fuelType,
-    transmission,
-    bodyType,
-    minSafety,
-    limit,
-  } = body;
-
-  // Numerical validation & sanitization
-  const parsedMinPrice = minPrice !== undefined && minPrice !== '' && minPrice !== null ? Number(minPrice) : null;
-  const parsedMaxPrice = maxPrice !== undefined && maxPrice !== '' && maxPrice !== null ? Number(maxPrice) : null;
-  const parsedMinSafety = minSafety !== undefined && minSafety !== '' && minSafety !== null ? Number(minSafety) : null;
-  const parsedLimit = Math.min(Math.max(Number(limit) || 12, 1), 50);
-
-  if (parsedMinPrice !== null && (isNaN(parsedMinPrice) || parsedMinPrice < 0)) {
-    return NextResponse.json({ success: false, error: 'minPrice must be a non-negative number' }, { status: 400 });
-  }
-  if (parsedMaxPrice !== null && (isNaN(parsedMaxPrice) || parsedMaxPrice < 0)) {
-    return NextResponse.json({ success: false, error: 'maxPrice must be a non-negative number' }, { status: 400 });
-  }
-  if (parsedMinPrice !== null && parsedMaxPrice !== null && parsedMinPrice > parsedMaxPrice) {
-    return NextResponse.json({ success: false, error: 'minPrice cannot exceed maxPrice' }, { status: 400 });
-  }
-  if (parsedMinSafety !== null && (isNaN(parsedMinSafety) || parsedMinSafety < 0 || parsedMinSafety > 5)) {
-    return NextResponse.json({ success: false, error: 'minSafety must be between 0.0 and 5.0' }, { status: 400 });
-  }
-
-  // Enum validation
-  const cleanFuel = fuelType && fuelType !== 'all' ? fuelType.trim() : null;
-  if (cleanFuel && !VALID_FUEL_TYPES.some((f) => f.toLowerCase() === cleanFuel.toLowerCase())) {
-    return NextResponse.json({ success: false, error: `Invalid fuelType: "${cleanFuel}". Allowed: ${VALID_FUEL_TYPES.join(', ')}` }, { status: 400 });
-  }
-
-  const cleanTrans = transmission && transmission !== 'all' ? transmission.trim() : null;
-  if (cleanTrans && !VALID_TRANSMISSIONS.some((t) => t.toLowerCase() === cleanTrans.toLowerCase())) {
-    return NextResponse.json({ success: false, error: `Invalid transmission: "${cleanTrans}". Allowed: ${VALID_TRANSMISSIONS.join(', ')}` }, { status: 400 });
-  }
-
-  const cleanBody = bodyType && bodyType !== 'all' ? bodyType.trim() : null;
-  if (cleanBody && !VALID_BODY_TYPES.some((b) => b.toLowerCase() === cleanBody.toLowerCase())) {
-    return NextResponse.json({ success: false, error: `Invalid bodyType: "${cleanBody}". Allowed: ${VALID_BODY_TYPES.join(', ')}` }, { status: 400 });
-  }
+    prompt: rawPrompt,
+    minPrice: parsedMinPrice,
+    maxPrice: parsedMaxPrice,
+    fuelType: cleanFuel,
+    transmission: cleanTrans,
+    bodyType: cleanBody,
+    minSafety: parsedMinSafety,
+    limit: parsedLimit,
+  } = parseResult.data;
 
   // Offline simulation demo mode check (only if explicitly enabled via query parameter for offline viva showcase)
   const isDemoRequested = req.nextUrl.searchParams.get('demo') === 'true';
 
   try {
-    const trimmedPrompt = (prompt || '').trim();
+    const trimmedPrompt = (rawPrompt || '').trim();
     const hasPrompt = trimmedPrompt.length > 0;
 
-    // Check embedding provider (OpenAI vs Keyword)
-    const embeddingResult = hasPrompt ? await getEmbedding(trimmedPrompt) : { embedding: null, mode: 'keyword_fallback', provider: 'none' };
+    // Check embedding provider (OpenAI vs Keyword fallback)
+    const embeddingResult = hasPrompt
+      ? await getEmbedding(trimmedPrompt)
+      : { embedding: null, mode: 'keyword_fallback' as const, provider: 'none' };
     const hasVector = embeddingResult.embedding !== null;
 
     // Parameterized SQL construction
+    // Hard criteria filters are ALWAYS applied first
     const whereClauses: string[] = ['cv.is_active = TRUE', "cm.launch_status = 'launched'"];
     const params: any[] = [];
     let paramIndex = 1;
@@ -136,17 +100,35 @@ export async function POST(req: NextRequest) {
       paramIndex++;
     }
 
-    // Optional text search condition if prompt is supplied but vector is unavailable
-    if (hasPrompt && !hasVector) {
-      whereClauses.push(`(
-        cm.model_name ILIKE $${paramIndex} OR
-        cv.variant_name ILIKE $${paramIndex} OR
-        m.name ILIKE $${paramIndex} OR
-        cv.fuel_type::text ILIKE $${paramIndex} OR
-        cm.body_type::text ILIKE $${paramIndex}
-      )`);
-      params.push(`%${trimmedPrompt}%`);
-      paramIndex++;
+    // Keyword Tokenization & Fallback Scoring
+    const searchTokens = !hasVector && hasPrompt ? extractSearchTokens(trimmedPrompt) : [];
+    const tokenMatchConditions: string[] = [];
+
+    if (!hasVector && searchTokens.length > 0) {
+      for (const token of searchTokens) {
+        const tokenParamIdx = paramIndex;
+        params.push(`%${token}%`);
+        paramIndex++;
+
+        // Multi-keyword token matching across model, variant, manufacturer, body_type, fuel_type, transmission, and features
+        tokenMatchConditions.push(`(
+          cm.model_name ILIKE $${tokenParamIdx} OR
+          cv.variant_name ILIKE $${tokenParamIdx} OR
+          m.name ILIKE $${tokenParamIdx} OR
+          cm.body_type::text ILIKE $${tokenParamIdx} OR
+          cv.fuel_type::text ILIKE $${tokenParamIdx} OR
+          cv.transmission::text ILIKE $${tokenParamIdx} OR
+          EXISTS (
+            SELECT 1 FROM variant_features vf_kw
+            JOIN features f_kw ON vf_kw.feature_id = f_kw.feature_id
+            WHERE vf_kw.variant_id = cv.variant_id
+              AND (f_kw.feature_name ILIKE $${tokenParamIdx} OR f_kw.description ILIKE $${tokenParamIdx})
+          )
+        )`);
+      }
+
+      // Filter: Vehicle must match at least one extracted keyword token
+      whereClauses.push(`(${tokenMatchConditions.join(' OR ')})`);
     }
 
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
@@ -154,7 +136,37 @@ export async function POST(req: NextRequest) {
     params.push(parsedLimit);
     const limitPlaceholder = `$${paramIndex}`;
 
-    // Hybrid SQL query: pgvector cosine similarity distance (<=>) + multi-attribute constraints + deterministic tie-breakers
+    // Compute similarity score & combined relevance score:
+    // 1. If vector available: Cosine similarity (1.0 - distance)
+    // 2. If offline fallback with tokens: Normalized keyword match density (matching_tokens / total_tokens)
+    // 3. If multi-attribute only: Constant 0.50 base similarity
+    let similaritySqlSnippet: string;
+    let relevanceSqlSnippet: string;
+
+    if (hasVector) {
+      similaritySqlSnippet = `(1.0 - (cv.embedding <=> ${vectorPlaceholder}))`;
+      relevanceSqlSnippet = `(
+        (1.0 - (cv.embedding <=> ${vectorPlaceholder})) * 0.70 +
+        (COALESCE(cv.safety_rating_ncap, 3.0) / 5.0) * 0.30
+      )`;
+    } else if (tokenMatchConditions.length > 0) {
+      const matchDensityExpr = `((${tokenMatchConditions
+        .map((cond) => `(CASE WHEN ${cond} THEN 1.0 ELSE 0.0 END)`)
+        .join(' + ')}) / ${tokenMatchConditions.length}.0)`;
+
+      similaritySqlSnippet = matchDensityExpr;
+      relevanceSqlSnippet = `(
+        (${matchDensityExpr}) * 0.70 +
+        (COALESCE(cv.safety_rating_ncap, 3.0) / 5.0) * 0.30
+      )`;
+    } else {
+      similaritySqlSnippet = '0.50';
+      relevanceSqlSnippet = `(
+        0.50 * 0.70 +
+        (COALESCE(cv.safety_rating_ncap, 3.0) / 5.0) * 0.30
+      )`;
+    }
+
     const hybridSql = `
       SELECT
         cv.variant_id,
@@ -176,23 +188,8 @@ export async function POST(req: NextRequest) {
           ARRAY_AGG(f.feature_name ORDER BY f.feature_name) FILTER (WHERE vf.is_standard = TRUE),
           '{}'
         ) AS standard_features,
-        ROUND(
-          (CASE
-            WHEN ${hasVector ? 'cv.embedding IS NOT NULL' : 'FALSE'}
-            THEN (1.0 - (cv.embedding <=> ${vectorPlaceholder}))
-            ELSE 0.50
-          END)::numeric, 4
-        ) AS similarity_score,
-        ROUND(
-          (
-            (CASE
-              WHEN ${hasVector ? 'cv.embedding IS NOT NULL' : 'FALSE'}
-              THEN (1.0 - (cv.embedding <=> ${vectorPlaceholder}))
-              ELSE 0.50
-            END) * 0.70 +
-            (COALESCE(cv.safety_rating_ncap, 3.0) / 5.0) * 0.30
-          )::numeric, 4
-        ) AS combined_relevance_score
+        ROUND((${similaritySqlSnippet})::numeric, 4) AS similarity_score,
+        ROUND((${relevanceSqlSnippet})::numeric, 4) AS combined_relevance_score
       FROM car_variants cv
       JOIN car_models cm ON cv.model_id = cm.model_id
       JOIN manufacturers m ON cm.manufacturer_id = m.manufacturer_id
@@ -251,7 +248,13 @@ export async function POST(req: NextRequest) {
       success: true,
       count: result.rows.length,
       data_source: 'live_postgresql',
-      vector_mode: hasVector ? 'pgvector_cosine_distance' : hasPrompt ? 'sql_keyword_fallback' : 'multi_attribute_only',
+      vector_mode: hasVector
+        ? 'pgvector_cosine_distance'
+        : searchTokens.length > 0
+        ? 'keyword_token_density_fallback'
+        : 'multi_attribute_only',
+      token_count: searchTokens.length,
+      tokens_matched: searchTokens,
       query: {
         prompt: trimmedPrompt,
         minPrice: parsedMinPrice,
@@ -277,12 +280,26 @@ export async function POST(req: NextRequest) {
       if (cleanBody) filtered = filtered.filter((c) => c.body_type.toLowerCase() === cleanBody.toLowerCase());
       if (parsedMinSafety !== null) filtered = filtered.filter((c) => c.safety_rating_ncap >= parsedMinSafety);
 
+      const searchTokens = extractSearchTokens(rawPrompt || '');
+      if (searchTokens.length > 0) {
+        filtered = filtered
+          .map((car) => {
+            const carText = `${car.manufacturer_name} ${car.model_name} ${car.variant_name} ${car.body_type} ${car.fuel_type} ${car.transmission} ${(car.standard_features || []).join(' ')}`.toLowerCase();
+            const matchCount = searchTokens.reduce((acc, t) => acc + (carText.includes(t) ? 1 : 0), 0);
+            const density = matchCount / searchTokens.length;
+            const score = Number((density * 0.70 + (car.safety_rating_ncap / 5.0) * 0.30).toFixed(4));
+            return { ...car, similarity_score: Number(density.toFixed(4)), combined_relevance_score: score, matchCount };
+          })
+          .filter((car) => car.matchCount > 0)
+          .sort((a, b) => b.combined_relevance_score - a.combined_relevance_score);
+      }
+
       return NextResponse.json({
         success: true,
         count: filtered.length,
         data_source: 'simulated_offline_showcase',
         is_simulated_demo: true,
-        data: filtered,
+        data: filtered.slice(0, parsedLimit),
       });
     }
 

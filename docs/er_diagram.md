@@ -8,7 +8,7 @@
 
 ## 1. Formal Mermaid Entity-Relationship Diagram
 
-This diagram reflects the exact database schema implemented in [`database/01_schema.sql`](file:///Users/rujuljain/car-recommendation-dbms/database/01_schema.sql) and [`database/02_vector_setup.sql`](file:///Users/rujuljain/car-recommendation-dbms/database/02_vector_setup.sql).
+This diagram reflects the exact database schema implemented in [`database/01_schema.sql`](../database/01_schema.sql) and [`database/02_vector_setup.sql`](../database/02_vector_setup.sql).
 
 ```mermaid
 erDiagram

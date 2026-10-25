@@ -4,6 +4,7 @@ import { authOptions } from '@/lib/auth';
 import { query, pool } from '@/lib/db';
 import { getEmbedding, buildEnrichedVehicleText } from '@/lib/embeddings';
 import { requireAdmin } from '@/lib/auth-helpers';
+import { CarVariantAdminSchema, CarVariantUpdateSchema } from '@/lib/validations';
 
 export const dynamic = 'force-dynamic';
 
@@ -141,47 +142,35 @@ export async function POST(req: NextRequest) {
   const auth = await verifyAdminAuth(req);
   if (!auth.authorized) return auth.response;
 
-  let body: any;
+  let rawBody: any;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON request payload' }, { status: 400 });
+  }
+
+  const parseResult = CarVariantAdminSchema.safeParse(rawBody);
+  if (!parseResult.success) {
+    const firstError = parseResult.error.issues?.[0]?.message || 'Validation failed';
+    return NextResponse.json(
+      { success: false, error: firstError, errors: parseResult.error.flatten() },
+      { status: 400 }
+    );
   }
 
   const {
     modelId,
     variantName,
-    price,
+    price: numPrice,
     fuelType,
     transmission,
     engineDisplacementCc,
     powerBhp,
     torqueNm,
     mileageKmpl,
-    safetyRating,
+    safetyRating: numSafety,
     featureIds = [],
-  } = body;
-
-  // Strict validation
-  if (!modelId || !variantName || price === undefined || !fuelType || !transmission) {
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Missing required fields: modelId, variantName, price, fuelType, transmission are required.',
-      },
-      { status: 400 }
-    );
-  }
-
-  const numPrice = Number(price);
-  if (isNaN(numPrice) || numPrice <= 0) {
-    return NextResponse.json({ success: false, error: 'price must be a positive number' }, { status: 400 });
-  }
-
-  const numSafety = safetyRating !== undefined && safetyRating !== null && safetyRating !== '' ? Number(safetyRating) : null;
-  if (numSafety !== null && (isNaN(numSafety) || numSafety < 0 || numSafety > 5)) {
-    return NextResponse.json({ success: false, error: 'safetyRating must be between 0.0 and 5.0' }, { status: 400 });
-  }
+  } = parseResult.data;
 
   const client = await pool.connect();
   try {
@@ -306,18 +295,23 @@ export async function PUT(req: NextRequest) {
   const auth = await verifyAdminAuth(req);
   if (!auth.authorized) return auth.response;
 
-  let body: any;
+  let rawBody: any;
   try {
-    body = await req.json();
+    rawBody = await req.json();
   } catch {
     return NextResponse.json({ success: false, error: 'Invalid JSON request payload' }, { status: 400 });
   }
 
-  const { variantId, ...fieldsToUpdate } = body;
-
-  if (!variantId) {
-    return NextResponse.json({ success: false, error: 'variantId is required' }, { status: 400 });
+  const parseResult = CarVariantUpdateSchema.safeParse(rawBody);
+  if (!parseResult.success) {
+    const firstError = parseResult.error.issues?.[0]?.message || 'Validation failed';
+    return NextResponse.json(
+      { success: false, error: firstError, errors: parseResult.error.flatten() },
+      { status: 400 }
+    );
   }
+
+  const { variantId, ...fieldsToUpdate } = parseResult.data;
 
   const client = await pool.connect();
   try {
