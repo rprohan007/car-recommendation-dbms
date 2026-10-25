@@ -1,0 +1,13 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/admin/page": "app/admin/page.js",
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/login/page": "app/login/page.js",
+  "/page": "app/page.js",
+  "/register/page": "app/register/page.js",
+  "/api/upcoming/route": "app/api/upcoming/route.js",
+  "/api/admin/cars/route": "app/api/admin/cars/route.js",
+  "/api/auth/register/route": "app/api/auth/register/route.js",
+  "/api/recommend/route": "app/api/recommend/route.js",
+  "/api/compare/route": "app/api/compare/route.js"
+}
