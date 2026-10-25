@@ -8,8 +8,9 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const idsParam = searchParams.get('ids');
+    const isDemoRequested = searchParams.get('demo') === 'true';
 
-    // If no IDs provided, return list of all variants for selection dropdown
+    // If no IDs provided, return list of all active variants for selection dropdown
     if (!idsParam || idsParam.trim() === '') {
       try {
         const allSql = `
@@ -32,54 +33,64 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({
           success: true,
           count: allRes.rows.length,
+          data_source: 'live_postgresql',
           data: allRes.rows,
         });
-      } catch {
-        return NextResponse.json({
-          success: true,
-          count: SEED_VARIANTS.length,
-          data: SEED_VARIANTS.map((v) => ({
-            variant_id: v.variant_id,
-            variant_name: v.variant_name,
-            model_name: v.model_name,
-            manufacturer_name: v.manufacturer_name,
-            ex_showroom_price: v.ex_showroom_price,
-            fuel_type: v.fuel_type,
-            transmission: v.transmission,
-            body_type: v.body_type,
-          })),
-        });
+      } catch (err: any) {
+        if (isDemoRequested) {
+          return NextResponse.json({
+            success: true,
+            count: SEED_VARIANTS.length,
+            data_source: 'simulated_offline_showcase',
+            is_simulated_demo: true,
+            data: SEED_VARIANTS,
+          });
+        }
+        return NextResponse.json(
+          {
+            success: false,
+            code: 'DATABASE_UNAVAILABLE',
+            error: 'Failed to retrieve vehicle inventory from database',
+          },
+          { status: 503 }
+        );
       }
     }
 
     // Parse and sanitize ID integers
-    const variantIds = idsParam
-      .split(',')
-      .map((id) => parseInt(id.trim(), 10))
-      .filter((id) => !isNaN(id) && id > 0);
+    const rawTokens = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+    const variantIds: number[] = [];
+
+    for (const token of rawTokens) {
+      const num = parseInt(token, 10);
+      if (isNaN(num) || num <= 0 || !/^\d+$/.test(token)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: `Invalid vehicle ID: "${token}". All IDs must be positive integers.`,
+          },
+          { status: 400 }
+        );
+      }
+      variantIds.push(num);
+    }
 
     if (variantIds.length === 0) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'No valid positive integer IDs provided in "ids" parameter.',
-        },
+        { success: false, error: 'No valid positive integer IDs provided in "ids" parameter.' },
         { status: 400 }
       );
     }
 
     if (variantIds.length > 6) {
       return NextResponse.json(
-        {
-          success: false,
-          error: 'Cannot compare more than 6 vehicles simultaneously.',
-        },
+        { success: false, error: 'Cannot compare more than 6 vehicles simultaneously.' },
         { status: 400 }
       );
     }
 
     try {
-      // SQL JOIN with aggregated features array and structured feature objects
+      // Parameterized multi-table JOIN with standard and optional feature aggregation
       const compareSql = `
         SELECT 
           cv.variant_id,
@@ -149,47 +160,55 @@ export async function GET(req: NextRequest) {
 
       const result = await query(compareSql, [variantIds]);
 
-      if (result.rows.length > 0) {
+      if (result.rows.length === 0) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'No car variants found matching the provided IDs in database.',
+            requestedIds: variantIds,
+          },
+          { status: 404 }
+        );
+      }
+
+      const foundIds = result.rows.map((r: any) => r.variant_id);
+      const missingIds = variantIds.filter((id) => !foundIds.includes(id));
+
+      return NextResponse.json({
+        success: true,
+        count: result.rows.length,
+        data_source: 'live_postgresql',
+        requestedIds: variantIds,
+        missingIds: missingIds.length > 0 ? missingIds : undefined,
+        data: result.rows,
+      });
+    } catch (dbErr: any) {
+      console.error('[DATABASE ERROR] Comparison query failed:', dbErr?.message);
+
+      if (isDemoRequested) {
+        const matched = SEED_VARIANTS.filter((v) => variantIds.includes(v.variant_id));
         return NextResponse.json({
           success: true,
-          count: result.rows.length,
+          count: matched.length,
+          data_source: 'simulated_offline_showcase',
+          is_simulated_demo: true,
           requestedIds: variantIds,
-          data: result.rows,
+          data: matched,
         });
       }
-    } catch (dbErr: any) {
-      console.warn('Compare DB query failed, falling back to seed data:', dbErr?.message);
-    }
 
-    // Fallback using seed variants
-    const matched = SEED_VARIANTS.filter((v) => variantIds.includes(v.variant_id));
-
-    if (matched.length === 0) {
       return NextResponse.json(
         {
           success: false,
-          error: 'No car variants found matching the provided IDs.',
-          requestedIds: variantIds,
+          code: 'DATABASE_UNAVAILABLE',
+          error: 'Database connection failed. Please ensure PostgreSQL is running.',
         },
-        { status: 404 }
+        { status: 503 }
       );
     }
-
-    return NextResponse.json({
-      success: true,
-      count: matched.length,
-      requestedIds: variantIds,
-      fallback: true,
-      data: matched,
-    });
   } catch (err: any) {
-    console.error('Error in /api/compare:', err);
     return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to retrieve car comparison data',
-        details: process.env.NODE_ENV === 'development' ? err.message : undefined,
-      },
+      { success: false, error: 'Internal server error processing comparison' },
       { status: 500 }
     );
   }

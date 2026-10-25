@@ -19,7 +19,11 @@ import {
   Star,
   Info,
   Layers,
-  ArrowRight
+  ArrowRight,
+  Calculator,
+  X,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { formatPrice, formatINR, getStarArray } from '@/lib/formatters';
 
@@ -74,7 +78,17 @@ export default function RecommendationPortal() {
   const [hasSearched, setHasSearched] = useState<boolean>(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState<boolean>(true);
 
-  const fetchRecommendations = async () => {
+  // Database Connection & Diagnostic State
+  const [dbUnavailable, setDbUnavailable] = useState<boolean>(false);
+  const [demoMode, setDemoMode] = useState<boolean>(false);
+
+  // Active Car for Specs & EMI Calculator Modal
+  const [activeModalCar, setActiveModalCar] = useState<CarResult | null>(null);
+  const [downPaymentPercent, setDownPaymentPercent] = useState<number>(20);
+  const [interestRate, setInterestRate] = useState<number>(8.5);
+  const [tenureMonths, setTenureMonths] = useState<number>(60);
+
+  const fetchRecommendations = async (overrideDemo = demoMode) => {
     setLoading(true);
     try {
       const payload: any = {
@@ -88,20 +102,26 @@ export default function RecommendationPortal() {
       if (bodyType !== 'all') payload.bodyType = bodyType;
       if (minSafety > 0) payload.minSafety = minSafety;
 
-      const res = await fetch('/api/recommend', {
+      const endpoint = overrideDemo ? '/api/recommend?demo=true' : '/api/recommend';
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
 
       const data = await res.json();
-      if (data.success && Array.isArray(data.data)) {
+      if (res.status === 503 || data.code === 'DATABASE_UNAVAILABLE') {
+        setDbUnavailable(true);
+        setCars([]);
+      } else if (data.success && Array.isArray(data.data)) {
         setCars(data.data);
+        setDbUnavailable(false);
       } else {
         setCars([]);
       }
     } catch (err) {
       console.error('Failed to fetch recommendations:', err);
+      setDbUnavailable(true);
       setCars([]);
     } finally {
       setLoading(false);
@@ -189,6 +209,61 @@ export default function RecommendationPortal() {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+        {/* Database Offline Fail-Closed Notification Banner */}
+        {dbUnavailable && !demoMode && (
+          <div className="mb-8 p-5 bg-amber-500/10 border border-amber-500/30 rounded-2xl backdrop-blur-md animate-in fade-in">
+            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-amber-500/20 text-amber-400 rounded-xl shrink-0 mt-0.5">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-amber-300">Live PostgreSQL Database Offline (Fail-Closed Enforcement)</h4>
+                  <p className="text-xs text-slate-300 mt-1 max-w-3xl leading-relaxed">
+                    Per the university evaluation security requirements, the application refuses to mask database connection failures behind silent unauthenticated mock responses. To query the live database, run PostgreSQL and execute <code className="text-amber-300 font-mono">database/01_schema.sql</code> through <code className="text-amber-300 font-mono">04_seed.sql</code>. Alternatively, launch the offline demo dataset below to evaluate UI filtering and scoring.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2.5 self-end md:self-center shrink-0">
+                <button
+                  onClick={() => {
+                    setDemoMode(true);
+                    fetchRecommendations(true);
+                  }}
+                  className="text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 px-4 py-2.5 rounded-xl transition shadow-md shadow-amber-950/30"
+                >
+                  Load Demo Dataset
+                </button>
+                <button
+                  onClick={() => fetchRecommendations(false)}
+                  className="text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2.5 rounded-xl transition border border-slate-700"
+                >
+                  Retry Connection
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Demo Mode Notice Badge */}
+        {demoMode && (
+          <div className="mb-6 flex items-center justify-between p-3.5 bg-sky-950/40 border border-sky-500/30 rounded-xl text-xs backdrop-blur-md">
+            <span className="text-sky-300 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-sky-400" />
+              <span>Viewing Evaluation Demo Dataset (PostgreSQL Mock Stream)</span>
+            </span>
+            <button
+              onClick={() => {
+                setDemoMode(false);
+                fetchRecommendations(false);
+              }}
+              className="text-slate-400 hover:text-white underline text-[11px]"
+            >
+              Switch to Live PostgreSQL
+            </button>
+          </div>
+        )}
+
         {/* Search & Filter Panel */}
         <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-5 sm:p-7 backdrop-blur-xl shadow-2xl mb-10">
           <form onSubmit={handleSearchSubmit} className="space-y-6">
@@ -631,6 +706,14 @@ export default function RecommendationPortal() {
                         )}
                       </button>
 
+                      <button
+                        onClick={() => setActiveModalCar(car)}
+                        className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-sky-400 hover:text-sky-300 border border-slate-700 transition-colors"
+                        title="View Full Specs & EMI Loan Calculator"
+                      >
+                        <Calculator className="w-4 h-4" />
+                      </button>
+
                       <Link
                         href={`/compare?ids=${car.variant_id}`}
                         className="p-2.5 rounded-xl bg-slate-800/60 hover:bg-slate-700/80 text-slate-300 hover:text-white border border-slate-700 transition-colors"
@@ -681,6 +764,236 @@ export default function RecommendationPortal() {
           </div>
         </aside>
       )}
+      {/* Specs & Interactive EMI Calculator Modal */}
+      {activeModalCar && (() => {
+        const exPrice = activeModalCar.ex_showroom_price;
+        const downPaymentAmount = Math.round((exPrice * downPaymentPercent) / 100);
+        const principal = exPrice - downPaymentAmount;
+        const monthlyRate = interestRate / 12 / 100;
+        const emi = monthlyRate > 0
+          ? Math.round(
+              (principal * monthlyRate * Math.pow(1 + monthlyRate, tenureMonths)) /
+                (Math.pow(1 + monthlyRate, tenureMonths) - 1)
+            )
+          : Math.round(principal / tenureMonths);
+        const totalAmountPayable = emi * tenureMonths;
+        const totalInterest = totalAmountPayable - principal;
+        const isSelected = selectedForCompare.includes(activeModalCar.variant_id);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-in fade-in">
+            <div className="bg-[#0b101b] border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 sm:p-8">
+              {/* Modal Header */}
+              <div className="flex items-start justify-between pb-4 border-b border-slate-800">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold uppercase tracking-wider text-sky-400 bg-sky-500/10 px-2 py-0.5 rounded">
+                      {activeModalCar.manufacturer_name}
+                    </span>
+                    <span className="text-xs text-slate-400 bg-slate-800 px-2 py-0.5 rounded">
+                      {activeModalCar.body_type}
+                    </span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-black text-white">
+                    {activeModalCar.model_name} <span className="text-sky-300 font-semibold">{activeModalCar.variant_name}</span>
+                  </h2>
+                  <div className="mt-1 flex items-baseline gap-2">
+                    <span className="text-2xl font-extrabold text-white">
+                      {formatPrice(activeModalCar.ex_showroom_price)}
+                    </span>
+                    <span className="text-xs text-slate-400">Ex-Showroom Price</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveModalCar(null)}
+                  className="p-2 rounded-xl text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 transition"
+                  title="Close Modal"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Technical Specifications Matrix */}
+              <div className="mt-6">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                  Vehicle Engineering Specifications
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Fuel / Powertrain</span>
+                    <span className="text-xs font-bold text-white">{activeModalCar.fuel_type}</span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Transmission</span>
+                    <span className="text-xs font-bold text-white">{activeModalCar.transmission}</span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Power Output</span>
+                    <span className="text-xs font-bold text-white">{activeModalCar.power_bhp} bhp</span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Peak Torque</span>
+                    <span className="text-xs font-bold text-white">{activeModalCar.torque_nm} Nm</span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Economy / Range</span>
+                    <span className="text-xs font-bold text-sky-400">
+                      {activeModalCar.fuel_type === 'Electric' ? `${activeModalCar.mileage_kmpl} km` : `${activeModalCar.mileage_kmpl} kmpl`}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Displacement</span>
+                    <span className="text-xs font-bold text-white">
+                      {activeModalCar.engine_displacement_cc ? `${activeModalCar.engine_displacement_cc} cc` : 'N/A (EV)'}
+                    </span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Safety Rating</span>
+                    <span className="text-xs font-bold text-amber-400">
+                      {activeModalCar.safety_rating_ncap} Star NCAP
+                    </span>
+                  </div>
+                  <div className="p-3 bg-slate-900/80 rounded-xl border border-slate-800 text-center">
+                    <span className="text-[10px] text-slate-400 block">Seating Capacity</span>
+                    <span className="text-xs font-bold text-white">{activeModalCar.seating_capacity || 5} Seater</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Standard Features */}
+              {activeModalCar.standard_features && activeModalCar.standard_features.length > 0 && (
+                <div className="mt-6">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
+                    Included Equipment & Features
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {activeModalCar.standard_features.map((feat, idx) => (
+                      <span key={idx} className="text-xs bg-slate-800 text-slate-200 px-2.5 py-1 rounded-lg border border-slate-700/60">
+                        {feat}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Interactive Loan & EMI Calculator */}
+              <div className="mt-6 p-5 bg-gradient-to-br from-slate-900 via-slate-900/90 to-sky-950/30 rounded-2xl border border-sky-500/20">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="p-1.5 rounded-lg bg-sky-500/20 text-sky-400">
+                    <Calculator className="w-4 h-4" />
+                  </div>
+                  <h3 className="text-sm font-bold text-white">
+                    Automotive Financing & Monthly EMI Planner
+                  </h3>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  {/* Slider Controls */}
+                  <div className="md:col-span-2 space-y-4">
+                    {/* Down Payment */}
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-400">Down Payment ({downPaymentPercent}%)</span>
+                        <span className="font-bold text-white">{formatINR(downPaymentAmount)}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={10}
+                        max={50}
+                        step={5}
+                        value={downPaymentPercent}
+                        onChange={(e) => setDownPaymentPercent(Number(e.target.value))}
+                        className="w-full accent-sky-400"
+                      />
+                    </div>
+
+                    {/* Interest Rate */}
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-400">Interest Rate (Annual)</span>
+                        <span className="font-bold text-white">{interestRate}% p.a.</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={7.0}
+                        max={14.0}
+                        step={0.25}
+                        value={interestRate}
+                        onChange={(e) => setInterestRate(Number(e.target.value))}
+                        className="w-full accent-sky-400"
+                      />
+                    </div>
+
+                    {/* Loan Tenure */}
+                    <div>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="text-slate-400">Loan Tenure</span>
+                        <span className="font-bold text-white">{tenureMonths} Months ({tenureMonths / 12} Yrs)</span>
+                      </div>
+                      <input
+                        type="range"
+                        min={12}
+                        max={84}
+                        step={12}
+                        value={tenureMonths}
+                        onChange={(e) => setTenureMonths(Number(e.target.value))}
+                        className="w-full accent-sky-400"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Calculated Output Summary */}
+                  <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] text-slate-400 font-semibold block">Estimated Monthly EMI</span>
+                      <div className="text-2xl font-black text-sky-400 mt-1">
+                        {formatINR(emi)} <span className="text-xs text-slate-400 font-normal">/mo</span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Principal Loan:</span>
+                        <span className="font-semibold text-slate-200">{formatINR(principal)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-400">Total Interest:</span>
+                        <span className="font-semibold text-amber-300">{formatINR(totalInterest)}</span>
+                      </div>
+                      <div className="flex justify-between font-bold pt-1 border-t border-slate-800/80">
+                        <span className="text-slate-300">Total Payable:</span>
+                        <span className="text-white">{formatINR(totalAmountPayable)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="mt-6 flex flex-col sm:flex-row items-center justify-end gap-3 pt-4 border-t border-slate-800">
+                <button
+                  onClick={() => toggleCompare(activeModalCar.variant_id)}
+                  className={`w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition ${
+                    isSelected
+                      ? 'bg-sky-500 text-slate-950'
+                      : 'bg-slate-800 text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  <Scale className="w-4 h-4" />
+                  <span>{isSelected ? 'Remove from Compare' : 'Add to Comparison'}</span>
+                </button>
+                <Link
+                  href={`/compare?ids=${activeModalCar.variant_id}`}
+                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs bg-gradient-to-r from-sky-400 to-blue-500 hover:from-sky-300 hover:to-blue-400 text-slate-950 flex items-center justify-center gap-2 transition"
+                >
+                  <span>Launch Side-by-Side Matrix</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

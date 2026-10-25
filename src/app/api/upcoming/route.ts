@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
-import { SEED_UPCOMING_LAUNCHES, UpcomingLaunch } from '@/lib/seed-data';
+import { SEED_UPCOMING_LAUNCHES } from '@/lib/seed-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,6 +9,7 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const bodyType = searchParams.get('bodyType');
     const manufacturer = searchParams.get('manufacturer');
+    const isDemoRequested = searchParams.get('demo') === 'true';
 
     const whereClauses: string[] = [];
     const params: any[] = [];
@@ -49,51 +50,52 @@ export async function GET(req: NextRequest) {
 
     try {
       const result = await query(sql, params);
-      if (result && result.rows) {
+      return NextResponse.json({
+        success: true,
+        count: result.rows.length,
+        data_source: 'live_postgresql',
+        filters: {
+          bodyType: bodyType || null,
+          manufacturer: manufacturer || null,
+        },
+        data: result.rows,
+      });
+    } catch (dbErr: any) {
+      console.error('[DATABASE ERROR] Upcoming launches query failed:', dbErr?.message);
+
+      if (isDemoRequested) {
+        let filtered = [...SEED_UPCOMING_LAUNCHES];
+        if (bodyType && bodyType !== 'all') {
+          filtered = filtered.filter((u) => u.body_type.toLowerCase() === bodyType.toLowerCase());
+        }
+        if (manufacturer && manufacturer !== 'all') {
+          filtered = filtered.filter((u) =>
+            u.manufacturer_name.toLowerCase().includes(manufacturer.toLowerCase())
+          );
+        }
         return NextResponse.json({
           success: true,
-          count: result.rows.length,
+          count: filtered.length,
+          data_source: 'simulated_offline_showcase',
+          is_simulated_demo: true,
           filters: {
             bodyType: bodyType || null,
             manufacturer: manufacturer || null,
           },
-          data: result.rows,
+          data: filtered,
         });
       }
-    } catch (dbErr: any) {
-      console.warn('Upcoming view DB query failed, using seed upcoming launches:', dbErr?.message);
-    }
 
-    // Fallback using seed launches
-    let filtered = [...SEED_UPCOMING_LAUNCHES];
-    if (bodyType && bodyType !== 'all') {
-      filtered = filtered.filter((u) => u.body_type.toLowerCase() === bodyType.toLowerCase());
-    }
-    if (manufacturer && manufacturer !== 'all') {
-      filtered = filtered.filter((u) =>
-        u.manufacturer_name.toLowerCase().includes(manufacturer.toLowerCase())
+      return NextResponse.json(
+        {
+          success: false,
+          code: 'DATABASE_UNAVAILABLE',
+          error: 'Database connection failed. Unable to query v_upcoming_launches view.',
+        },
+        { status: 503 }
       );
     }
-
-    return NextResponse.json({
-      success: true,
-      count: filtered.length,
-      fallback: true,
-      filters: {
-        bodyType: bodyType || null,
-        manufacturer: manufacturer || null,
-      },
-      data: filtered,
-    });
   } catch (err: any) {
-    console.error('Error in /api/upcoming:', err);
-    return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to retrieve upcoming vehicle launches',
-        details: process.env.NODE_ENV === 'development' ? err.message : undefined,
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({ success: false, error: 'Internal server error' }, { status: 500 });
   }
 }

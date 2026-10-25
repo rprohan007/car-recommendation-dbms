@@ -20,7 +20,8 @@ import {
   Sparkles,
   ArrowLeft,
   ChevronDown,
-  Layers
+  Layers,
+  Share2
 } from 'lucide-react';
 import { formatPrice, formatINR, getStarArray } from '@/lib/formatters';
 
@@ -79,6 +80,16 @@ function CompareMatrixContent() {
   const [loading, setLoading] = useState<boolean>(true);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [copied, setCopied] = useState<boolean>(false);
+  const [dbUnavailable, setDbUnavailable] = useState<boolean>(false);
+
+  const handleCopyLink = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
 
   // Read initial IDs from query string (?ids=1,2,3)
   useEffect(() => {
@@ -128,13 +139,18 @@ function CompareMatrixContent() {
       try {
         const res = await fetch(`/api/compare?ids=${selectedIds.join(',')}`);
         const data = await res.json();
-        if (data.success && Array.isArray(data.data)) {
+        if (res.status === 503 || data.code === 'DATABASE_UNAVAILABLE') {
+          setDbUnavailable(true);
+          setComparedCars([]);
+        } else if (data.success && Array.isArray(data.data)) {
           setComparedCars(data.data);
+          setDbUnavailable(false);
         } else {
           setComparedCars([]);
         }
       } catch (err) {
         console.error('Failed to load comparison data:', err);
+        setDbUnavailable(true);
         setComparedCars([]);
       } finally {
         setLoading(false);
@@ -214,7 +230,7 @@ function CompareMatrixContent() {
               </p>
             </div>
 
-            {/* Quick Presets */}
+            {/* Quick Presets and Share Button */}
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs text-slate-400 font-medium hidden sm:inline">Presets:</span>
               {POPULAR_COMPARISONS.map((p, idx) => (
@@ -226,12 +242,42 @@ function CompareMatrixContent() {
                   {p.label}
                 </button>
               ))}
+
+              <button
+                onClick={handleCopyLink}
+                className="flex items-center gap-1.5 text-xs font-semibold bg-slate-800/80 hover:bg-slate-700/80 text-sky-400 hover:text-sky-300 px-3 py-1.5 rounded-lg border border-slate-700 transition-colors shadow-sm ml-1"
+                title="Copy shareable comparison link"
+              >
+                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Share2 className="w-3.5 h-3.5" />}
+                <span>{copied ? 'Link Copied!' : 'Share Matrix'}</span>
+              </button>
             </div>
           </div>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-8">
+        {/* Database Offline Warning */}
+        {dbUnavailable && (
+          <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/30 rounded-2xl text-xs text-amber-300 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>PostgreSQL Database Offline (Fail-Closed Enforcement). Start PostgreSQL to query the live multi-attribute comparison matrix.</span>
+            </div>
+            <button
+              onClick={() => {
+                setLoading(true);
+                fetch(`/api/compare?ids=${selectedIds.join(',')}`)
+                  .then(r => r.json())
+                  .then(d => { if (d.success) { setComparedCars(d.data); setDbUnavailable(false); } })
+                  .finally(() => setLoading(false));
+              }}
+              className="text-slate-900 bg-amber-400 hover:bg-amber-300 font-bold px-3 py-1 rounded-lg shrink-0 transition"
+            >
+              Retry
+            </button>
+          </div>
+        )}
         {/* Selection Bar & Multi-Select Dropdown */}
         <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 sm:p-6 mb-8 backdrop-blur-xl shadow-xl">
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">

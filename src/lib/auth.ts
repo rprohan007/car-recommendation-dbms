@@ -2,6 +2,9 @@ import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 import { query } from '@/lib/db';
+import { getAppEnv } from '@/lib/env';
+
+const env = getAppEnv();
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -12,14 +15,15 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
       async authorize(credentials) {
+        // Strict input presence check
         if (!credentials?.email || !credentials?.password) {
-          throw new Error('Please enter both email and password');
+          throw new Error('Invalid email or password');
         }
 
         const normalizedEmail = credentials.email.trim().toLowerCase();
 
+        // Parameterized SQL query: looks up user strictly from PostgreSQL users table
         try {
-          // Parameterized SQL query looking up user from PostgreSQL
           const sql = `
             SELECT user_id, full_name, email, password_hash, role
             FROM users
@@ -30,45 +34,36 @@ export const authOptions: NextAuthOptions = {
           const result = await query(sql, [normalizedEmail]);
           const user = result.rows[0];
 
-          if (user) {
-            // Verify password hash with bcryptjs
-            const isValidPassword = await bcrypt.compare(credentials.password, user.password_hash);
-            if (isValidPassword) {
-              const role = (user.role || 'customer').toString().toUpperCase();
-              return {
-                id: user.user_id.toString(),
-                name: user.full_name,
-                email: user.email,
-                role,
-                userId: user.user_id,
-              };
-            }
+          if (!user || !user.password_hash) {
+            // Generic error message to prevent user enumeration
+            throw new Error('Invalid email or password');
           }
-        } catch (dbErr) {
-          console.warn('Database query failed in authorize, checking demo accounts fallback:', dbErr);
-        }
 
-        // Demo fallback accounts for smooth testing and local RBAC evaluation
-        if (normalizedEmail === 'vikram.admin@cardb.in' && (credentials.password === 'Admin@123' || credentials.password.length > 0)) {
-          return {
-            id: '3',
-            name: 'Vikram Malhotra',
-            email: 'vikram.admin@cardb.in',
-            role: 'ADMIN',
-            userId: 3,
-          };
-        }
-        if (normalizedEmail === 'rohan.patel@example.com' && (credentials.password === 'Customer@123' || credentials.password.length > 0)) {
-          return {
-            id: '1',
-            name: 'Rohan Patel',
-            email: 'rohan.patel@example.com',
-            role: 'CUSTOMER',
-            userId: 1,
-          };
-        }
+          // Cryptographic verification against stored bcrypt hash ONLY
+          const isValidPassword = await bcrypt.compare(credentials.password, user.password_hash);
+          if (!isValidPassword) {
+            throw new Error('Invalid email or password');
+          }
 
-        throw new Error('Invalid email or password');
+          // Normalize role strictly to uppercase
+          const role = (user.role || 'customer').toString().toUpperCase();
+
+          return {
+            id: user.user_id.toString(),
+            name: user.full_name,
+            email: user.email,
+            role,
+            userId: user.user_id,
+          };
+        } catch (dbError: any) {
+          // If error is already our generic invalid credentials error, rethrow it
+          if (dbError.message === 'Invalid email or password') {
+            throw dbError;
+          }
+          // Security: Fail closed on database outage or connection error. Never bypass auth.
+          console.error('[SECURITY AUDIT] Authentication database query failed:', dbError?.message);
+          throw new Error('Authentication service temporarily unavailable. Please verify database connectivity.');
+        }
       },
     }),
   ],
@@ -95,5 +90,5 @@ export const authOptions: NextAuthOptions = {
   pages: {
     signIn: '/login',
   },
-  secret: process.env.NEXTAUTH_SECRET || 'car-recommendation-dbms-nextauth-super-secret-key-2026',
+  secret: env.NEXTAUTH_SECRET,
 };

@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query, pool } from '@/lib/db';
-import { getEmbedding } from '@/lib/embeddings';
+import { getEmbedding, buildEnrichedVehicleText } from '@/lib/embeddings';
+import { requireAdmin } from '@/lib/auth-helpers';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/admin/cars
  * Lists car variants with complete specifications for admin management
+ * Protected: Requires ADMIN role
  */
 export async function GET(req: NextRequest) {
+  const { errorResponse } = await requireAdmin(req);
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(req.url);
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '50', 10), 1), 100);
@@ -28,7 +33,7 @@ export async function GET(req: NextRequest) {
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
     const listSql = `
-      SELECT 
+      SELECT
         cv.variant_id,
         cv.variant_name,
         cv.model_id,
@@ -52,7 +57,7 @@ export async function GET(req: NextRequest) {
       JOIN manufacturers m ON cm.manufacturer_id = m.manufacturer_id
       LEFT JOIN variant_features vf ON cv.variant_id = vf.variant_id
       ${whereSql}
-      GROUP BY 
+      GROUP BY
         cv.variant_id,
         cv.variant_name,
         cv.model_id,
@@ -84,66 +89,107 @@ export async function GET(req: NextRequest) {
       data: result.rows,
     });
   } catch (err: any) {
-    console.warn('GET /api/admin/cars query failed, returning seed fallback:', err?.message);
-    const { SEED_VARIANTS } = await import('@/lib/seed-data');
-    return NextResponse.json({
-      success: true,
-      count: SEED_VARIANTS.length,
-      fallback: true,
-      data: SEED_VARIANTS,
-    });
+    console.error('Database error in GET /api/admin/cars:', err?.message);
+    return NextResponse.json(
+      { success: false, error: 'Database service unavailable. Failed to retrieve car variants.' },
+      { status: 503 }
+    );
   }
 }
 
 /**
  * POST /api/admin/cars
  * Creates a new car variant with specifications and automatic vector embedding
+ * Protected: Requires ADMIN role
  */
 export async function POST(req: NextRequest) {
+  const { errorResponse } = await requireAdmin(req);
+  if (errorResponse) return errorResponse;
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON request payload' }, { status: 400 });
+  }
+
+  const {
+    modelId,
+    variantName,
+    price,
+    fuelType,
+    transmission,
+    engineDisplacementCc,
+    powerBhp,
+    torqueNm,
+    mileageKmpl,
+    safetyRating,
+    featureIds = [],
+  } = body;
+
+  // Strict validation
+  if (!modelId || !variantName || price === undefined || !fuelType || !transmission) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: 'Missing required fields: modelId, variantName, price, fuelType, transmission are required.',
+      },
+      { status: 400 }
+    );
+  }
+
+  const numPrice = Number(price);
+  if (isNaN(numPrice) || numPrice <= 0) {
+    return NextResponse.json({ success: false, error: 'price must be a positive number' }, { status: 400 });
+  }
+
+  const numSafety = safetyRating !== undefined && safetyRating !== null && safetyRating !== '' ? Number(safetyRating) : null;
+  if (numSafety !== null && (isNaN(numSafety) || numSafety < 0 || numSafety > 5)) {
+    return NextResponse.json({ success: false, error: 'safetyRating must be between 0.0 and 5.0' }, { status: 400 });
+  }
+
   const client = await pool.connect();
   try {
-    const body = await req.json();
-    const {
-      modelId,
-      variantName,
-      price,
-      fuelType,
-      transmission,
-      engineDisplacementCc,
-      powerBhp,
-      torqueNm,
-      mileageKmpl,
-      safetyRating,
-      featureIds = [],
-    } = body;
-
-    // Strict validation
-    if (!modelId || !variantName || price === undefined || !fuelType || !transmission) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Missing required fields: modelId, variantName, price, fuelType, transmission are required.',
-        },
-        { status: 400 }
-      );
-    }
-
-    const numPrice = Number(price);
-    if (isNaN(numPrice) || numPrice <= 0) {
-      return NextResponse.json({ success: false, error: 'price must be a positive number' }, { status: 400 });
-    }
-
-    const numSafety = safetyRating !== undefined && safetyRating !== null ? Number(safetyRating) : null;
-    if (numSafety !== null && (isNaN(numSafety) || numSafety < 0 || numSafety > 5)) {
-      return NextResponse.json({ success: false, error: 'safetyRating must be between 0.0 and 5.0' }, { status: 400 });
-    }
-
-    // Auto-generate semantic text representation for vector embedding
-    const descForEmbedding = `${variantName} ${fuelType} ${transmission} ex-showroom ${numPrice} INR safety ${numSafety || 'unrated'} stars`;
-    const embeddingArray = await getEmbedding(descForEmbedding);
-    const vectorString = `[${embeddingArray.join(',')}]`;
-
     await client.query('BEGIN');
+
+    // Fetch parent model & manufacturer details for rich embedding generation
+    const modelMetaRes = await client.query(
+      `SELECT cm.model_name, cm.body_type, m.name AS manufacturer_name
+       FROM car_models cm
+       JOIN manufacturers m ON cm.manufacturer_id = m.manufacturer_id
+       WHERE cm.model_id = $1`,
+      [Number(modelId)]
+    );
+
+    const modelMeta = modelMetaRes.rows[0] || {};
+
+    // Fetch feature names if featureIds provided
+    let featureNames: string[] = [];
+    if (Array.isArray(featureIds) && featureIds.length > 0) {
+      const featRes = await client.query(
+        `SELECT feature_name FROM features WHERE feature_id = ANY($1::int[])`,
+        [featureIds.map(Number)]
+      );
+      featureNames = featRes.rows.map((r) => r.feature_name);
+    }
+
+    // Build enriched text for semantic vector representation
+    const enrichedText = buildEnrichedVehicleText({
+      manufacturerName: modelMeta.manufacturer_name,
+      modelName: modelMeta.model_name,
+      variantName: variantName.trim(),
+      bodyType: modelMeta.body_type,
+      fuelType: fuelType.trim(),
+      transmission: transmission.trim(),
+      price: numPrice,
+      powerBhp: powerBhp ? Number(powerBhp) : null,
+      torqueNm: torqueNm ? Number(torqueNm) : null,
+      safetyRating: numSafety,
+      features: featureNames,
+    });
+
+    const embeddingObj = await getEmbedding(enrichedText);
+    const vectorString = embeddingObj.embedding ? `[${embeddingObj.embedding.join(',')}]` : null;
 
     // Parameterized INSERT into car_variants
     const insertVariantSql = `
@@ -166,7 +212,7 @@ export async function POST(req: NextRequest) {
     `;
 
     const insertResult = await client.query(insertVariantSql, [
-      modelId,
+      Number(modelId),
       variantName.trim(),
       numPrice,
       fuelType.trim(),
@@ -188,7 +234,7 @@ export async function POST(req: NextRequest) {
           `INSERT INTO variant_features (variant_id, feature_id, is_standard)
            VALUES ($1, $2, TRUE)
            ON CONFLICT DO NOTHING`,
-          [createdVariant.variant_id, featId]
+          [createdVariant.variant_id, Number(featId)]
         );
       }
     }
@@ -198,20 +244,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         success: true,
-        message: 'Car variant created successfully',
+        message: 'Car variant created successfully with vector embedding',
         data: createdVariant,
+        embeddingMode: embeddingObj.mode,
       },
       { status: 201 }
     );
   } catch (err: any) {
     await client.query('ROLLBACK');
-    console.error('Error in POST /api/admin/cars:', err);
+    console.error('Error in POST /api/admin/cars:', err?.message);
     return NextResponse.json(
-      {
-        success: false,
-        error: 'Failed to create car variant',
-        details: err.message,
-      },
+      { success: false, error: 'Database service unavailable or failed to create variant.' },
       { status: 500 }
     );
   } finally {
@@ -221,21 +264,47 @@ export async function POST(req: NextRequest) {
 
 /**
  * PUT /api/admin/cars
- * Updates specifications, pricing, or status of an existing car variant
+ * Updates specifications, pricing, status, and regenerates vector embeddings
+ * Protected: Requires ADMIN role
  */
 export async function PUT(req: NextRequest) {
-  try {
-    const body = await req.json();
-    const { variantId, ...fieldsToUpdate } = body;
+  const { errorResponse } = await requireAdmin(req);
+  if (errorResponse) return errorResponse;
 
-    if (!variantId) {
-      return NextResponse.json(
-        { success: false, error: 'variantId is required to update a car variant' },
-        { status: 400 }
-      );
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ success: false, error: 'Invalid JSON request payload' }, { status: 400 });
+  }
+
+  const { variantId, ...fieldsToUpdate } = body;
+
+  if (!variantId) {
+    return NextResponse.json({ success: false, error: 'variantId is required' }, { status: 400 });
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Check existing record
+    const existingRes = await client.query(
+      `SELECT cv.*, cm.model_name, cm.body_type, m.name AS manufacturer_name
+       FROM car_variants cv
+       JOIN car_models cm ON cv.model_id = cm.model_id
+       JOIN manufacturers m ON cm.manufacturer_id = m.manufacturer_id
+       WHERE cv.variant_id = $1`,
+      [Number(variantId)]
+    );
+
+    if (existingRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ success: false, error: `Variant #${variantId} not found` }, { status: 404 });
     }
 
-    // Dynamic Parameterized UPDATE Statement
+    const current = existingRes.rows[0];
+
     const updates: string[] = [];
     const params: any[] = [];
     let paramIndex = 1;
@@ -249,6 +318,7 @@ export async function PUT(req: NextRequest) {
     if (fieldsToUpdate.price !== undefined) {
       const p = Number(fieldsToUpdate.price);
       if (isNaN(p) || p <= 0) {
+        await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'price must be positive' }, { status: 400 });
       }
       updates.push(`ex_showroom_price = $${paramIndex}`);
@@ -295,6 +365,7 @@ export async function PUT(req: NextRequest) {
     if (fieldsToUpdate.safetyRating !== undefined) {
       const s = fieldsToUpdate.safetyRating !== null ? Number(fieldsToUpdate.safetyRating) : null;
       if (s !== null && (isNaN(s) || s < 0 || s > 5)) {
+        await client.query('ROLLBACK');
         return NextResponse.json({ success: false, error: 'safetyRating must be between 0.0 and 5.0' }, { status: 400 });
       }
       updates.push(`safety_rating_ncap = $${paramIndex}`);
@@ -308,79 +379,81 @@ export async function PUT(req: NextRequest) {
       paramIndex++;
     }
 
-    if (updates.length === 0) {
-      return NextResponse.json(
-        { success: false, error: 'No valid update fields provided.' },
-        { status: 400 }
-      );
+    // Regenerate vector embedding so embeddings never stay stale
+    const updatedName = fieldsToUpdate.variantName !== undefined ? fieldsToUpdate.variantName.trim() : current.variant_name;
+    const updatedFuel = fieldsToUpdate.fuelType !== undefined ? fieldsToUpdate.fuelType : current.fuel_type;
+    const updatedTrans = fieldsToUpdate.transmission !== undefined ? fieldsToUpdate.transmission : current.transmission;
+    const updatedPrice = fieldsToUpdate.price !== undefined ? Number(fieldsToUpdate.price) : current.ex_showroom_price;
+    const updatedPower = fieldsToUpdate.powerBhp !== undefined ? Number(fieldsToUpdate.powerBhp) : current.power_bhp;
+    const updatedSafety = fieldsToUpdate.safetyRating !== undefined ? Number(fieldsToUpdate.safetyRating) : current.safety_rating_ncap;
+
+    const enrichedText = buildEnrichedVehicleText({
+      manufacturerName: current.manufacturer_name,
+      modelName: current.model_name,
+      variantName: updatedName,
+      bodyType: current.body_type,
+      fuelType: updatedFuel,
+      transmission: updatedTrans,
+      price: updatedPrice,
+      powerBhp: updatedPower,
+      safetyRating: updatedSafety,
+    });
+
+    const embeddingObj = await getEmbedding(enrichedText);
+    if (embeddingObj.embedding) {
+      updates.push(`embedding = $${paramIndex}::vector`);
+      params.push(`[${embeddingObj.embedding.join(',')}]`);
+      paramIndex++;
     }
 
-    // Append variantId as the final parameter
-    params.push(variantId);
+    if (updates.length === 0) {
+      await client.query('ROLLBACK');
+      return NextResponse.json({ success: false, error: 'No valid update fields provided' }, { status: 400 });
+    }
+
+    params.push(Number(variantId));
     const updateSql = `
-      UPDATE car_variants 
+      UPDATE car_variants
       SET ${updates.join(', ')}
       WHERE variant_id = $${paramIndex}
       RETURNING *;
     `;
 
-    const result = await query(updateSql, params);
-
-    if (result.rows.length === 0) {
-      return NextResponse.json(
-        { success: false, error: `Car variant with ID ${variantId} not found` },
-        { status: 404 }
-      );
-    }
+    const result = await client.query(updateSql, params);
+    await client.query('COMMIT');
 
     return NextResponse.json({
       success: true,
-      message: 'Car variant updated successfully',
+      message: 'Car variant updated successfully and vector embedding synchronized',
       data: result.rows[0],
     });
   } catch (err: any) {
-    console.error('Error in PUT /api/admin/cars:', err);
-    return NextResponse.json(
-      { success: false, error: 'Failed to update car variant', details: err.message },
-      { status: 500 }
-    );
+    await client.query('ROLLBACK');
+    console.error('Error in PUT /api/admin/cars:', err?.message);
+    return NextResponse.json({ success: false, error: 'Failed to update car variant' }, { status: 500 });
+  } finally {
+    client.release();
   }
 }
 
 /**
  * DELETE /api/admin/cars
  * Deletes or archives a car variant using parameterized SQL DML
- * Usage: DELETE /api/admin/cars?id=123 OR payload { variantId: 123, hardDelete: false }
+ * Protected: Requires ADMIN role
  */
 export async function DELETE(req: NextRequest) {
+  const { errorResponse } = await requireAdmin(req);
+  if (errorResponse) return errorResponse;
+
   try {
     const { searchParams } = new URL(req.url);
     const queryId = searchParams.get('id');
+    const hardDelete = searchParams.get('hard') === 'true';
 
-    let variantId: number | null = null;
-    let hardDelete = false;
-
-    if (queryId) {
-      variantId = parseInt(queryId, 10);
-      hardDelete = searchParams.get('hard') === 'true';
-    } else {
-      try {
-        const body = await req.json();
-        variantId = body.variantId ? parseInt(body.variantId, 10) : null;
-        hardDelete = Boolean(body.hardDelete);
-      } catch {
-        // Body was empty or invalid JSON
-      }
-    }
+    let variantId: number | null = queryId ? parseInt(queryId, 10) : null;
 
     if (!variantId || isNaN(variantId)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Missing or invalid variantId. Provide via query (?id=123) or JSON payload.',
-        },
-        { status: 400 }
-      );
+      return NextResponse.json({ success: false, error: 'Missing or invalid variant ID' }, { status: 400 });
     }
 
     if (hardDelete) {
@@ -389,45 +462,36 @@ export async function DELETE(req: NextRequest) {
       const result = await query(deleteSql, [variantId]);
 
       if (result.rows.length === 0) {
-        return NextResponse.json(
-          { success: false, error: `Variant with ID ${variantId} not found.` },
-          { status: 404 }
-        );
+        return NextResponse.json({ success: false, error: `Variant #${variantId} not found` }, { status: 404 });
       }
 
       return NextResponse.json({
         success: true,
-        message: `Variant ${variantId} permanently deleted.`,
+        message: `Variant #${variantId} permanently deleted.`,
         deleted: result.rows[0],
       });
     } else {
       // Soft-archive by setting is_active = FALSE
       const archiveSql = `
-        UPDATE car_variants 
-        SET is_active = FALSE 
-        WHERE variant_id = $1 
+        UPDATE car_variants
+        SET is_active = FALSE
+        WHERE variant_id = $1
         RETURNING variant_id, variant_name, is_active;
       `;
       const result = await query(archiveSql, [variantId]);
 
       if (result.rows.length === 0) {
-        return NextResponse.json(
-          { success: false, error: `Variant with ID ${variantId} not found.` },
-          { status: 404 }
-        );
+        return NextResponse.json({ success: false, error: `Variant #${variantId} not found` }, { status: 404 });
       }
 
       return NextResponse.json({
         success: true,
-        message: `Variant ${variantId} archived (is_active set to false).`,
+        message: `Variant #${variantId} archived (is_active set to false).`,
         archived: result.rows[0],
       });
     }
   } catch (err: any) {
-    console.error('Error in DELETE /api/admin/cars:', err);
-    return NextResponse.json(
-      { success: false, error: 'Failed to delete/archive car variant', details: err.message },
-      { status: 500 }
-    );
+    console.error('Error in DELETE /api/admin/cars:', err?.message);
+    return NextResponse.json({ success: false, error: 'Failed to delete or archive variant' }, { status: 500 });
   }
 }

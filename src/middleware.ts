@@ -8,14 +8,27 @@ export async function middleware(req: NextRequest) {
   const isAdminPage = pathname.startsWith('/admin');
 
   if (isAdminApi || isAdminPage) {
-    const secret = process.env.NEXTAUTH_SECRET || 'car-recommendation-dbms-nextauth-super-secret-key-2026';
+    const secret = process.env.NEXTAUTH_SECRET || (process.env.NODE_ENV !== 'production' ? 'local-dev-only-secret-key-replace-in-production-min-32-chars' : undefined);
+
+    if (!secret) {
+      if (isAdminApi) {
+        return NextResponse.json(
+          { success: false, error: 'Server configuration error: NEXTAUTH_SECRET is required.' },
+          { status: 500 }
+        );
+      }
+      const loginUrl = new URL('/login', req.url);
+      loginUrl.searchParams.set('error', 'ConfigurationError');
+      return NextResponse.redirect(loginUrl);
+    }
+
     const token = await getToken({ req, secret });
 
     // Handle API routes protection (Return 401 / 403 JSON)
     if (isAdminApi) {
       if (!token) {
         return NextResponse.json(
-          { success: false, error: 'Unauthorized: Please authenticate to access admin APIs' },
+          { success: false, error: 'Unauthorized: Authentication required to access admin endpoints.' },
           { status: 401 }
         );
       }

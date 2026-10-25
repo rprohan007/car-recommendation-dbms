@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 import { getEmbedding } from '@/lib/embeddings';
-import { SEED_VARIANTS, SeedVariant } from '@/lib/seed-data';
+import { SEED_VARIANTS } from '@/lib/seed-data';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +13,12 @@ interface RecommendRequestBody {
   transmission?: string;
   bodyType?: string;
   minSafety?: number | string;
+  limit?: number | string;
 }
+
+const VALID_FUEL_TYPES = ['Petrol', 'Diesel', 'Electric', 'Hybrid', 'CNG'];
+const VALID_TRANSMISSIONS = ['Manual', 'Automatic', 'AMT', 'CVT', 'DCT'];
+const VALID_BODY_TYPES = ['SUV', 'Sedan', 'Hatchback', 'MUV', 'Coupe', 'Convertible'];
 
 export async function POST(req: NextRequest) {
   let body: RecommendRequestBody = {};
@@ -21,7 +26,7 @@ export async function POST(req: NextRequest) {
     body = await req.json();
   } catch {
     return NextResponse.json(
-      { error: 'Invalid JSON payload in request body' },
+      { success: false, error: 'Invalid JSON payload in request body' },
       { status: 400 }
     );
   }
@@ -34,35 +39,66 @@ export async function POST(req: NextRequest) {
     transmission,
     bodyType,
     minSafety,
+    limit,
   } = body;
 
-  // Numerical sanitization & parsing
+  // Numerical validation & sanitization
   const parsedMinPrice = minPrice !== undefined && minPrice !== '' && minPrice !== null ? Number(minPrice) : null;
   const parsedMaxPrice = maxPrice !== undefined && maxPrice !== '' && maxPrice !== null ? Number(maxPrice) : null;
   const parsedMinSafety = minSafety !== undefined && minSafety !== '' && minSafety !== null ? Number(minSafety) : null;
+  const parsedLimit = Math.min(Math.max(Number(limit) || 12, 1), 50);
 
   if (parsedMinPrice !== null && (isNaN(parsedMinPrice) || parsedMinPrice < 0)) {
-    return NextResponse.json({ error: 'minPrice must be a non-negative number' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'minPrice must be a non-negative number' }, { status: 400 });
   }
   if (parsedMaxPrice !== null && (isNaN(parsedMaxPrice) || parsedMaxPrice < 0)) {
-    return NextResponse.json({ error: 'maxPrice must be a non-negative number' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'maxPrice must be a non-negative number' }, { status: 400 });
   }
   if (parsedMinPrice !== null && parsedMaxPrice !== null && parsedMinPrice > parsedMaxPrice) {
-    return NextResponse.json({ error: 'minPrice cannot exceed maxPrice' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'minPrice cannot exceed maxPrice' }, { status: 400 });
   }
   if (parsedMinSafety !== null && (isNaN(parsedMinSafety) || parsedMinSafety < 0 || parsedMinSafety > 5)) {
-    return NextResponse.json({ error: 'minSafety must be between 0.0 and 5.0' }, { status: 400 });
+    return NextResponse.json({ success: false, error: 'minSafety must be between 0.0 and 5.0' }, { status: 400 });
   }
 
-  try {
-    // Convert prompt to 1536-dimensional vector embedding
-    const queryVector = await getEmbedding(prompt || 'reliable safe family car');
-    const vectorString = `[${queryVector.join(',')}]`;
+  // Enum validation
+  const cleanFuel = fuelType && fuelType !== 'all' ? fuelType.trim() : null;
+  if (cleanFuel && !VALID_FUEL_TYPES.some((f) => f.toLowerCase() === cleanFuel.toLowerCase())) {
+    return NextResponse.json({ success: false, error: `Invalid fuelType: "${cleanFuel}". Allowed: ${VALID_FUEL_TYPES.join(', ')}` }, { status: 400 });
+  }
 
-    // Dynamic Parameterized Query Construction
+  const cleanTrans = transmission && transmission !== 'all' ? transmission.trim() : null;
+  if (cleanTrans && !VALID_TRANSMISSIONS.some((t) => t.toLowerCase() === cleanTrans.toLowerCase())) {
+    return NextResponse.json({ success: false, error: `Invalid transmission: "${cleanTrans}". Allowed: ${VALID_TRANSMISSIONS.join(', ')}` }, { status: 400 });
+  }
+
+  const cleanBody = bodyType && bodyType !== 'all' ? bodyType.trim() : null;
+  if (cleanBody && !VALID_BODY_TYPES.some((b) => b.toLowerCase() === cleanBody.toLowerCase())) {
+    return NextResponse.json({ success: false, error: `Invalid bodyType: "${cleanBody}". Allowed: ${VALID_BODY_TYPES.join(', ')}` }, { status: 400 });
+  }
+
+  // Offline simulation demo mode check (only if explicitly enabled via query parameter for offline viva showcase)
+  const isDemoRequested = req.nextUrl.searchParams.get('demo') === 'true';
+
+  try {
+    const trimmedPrompt = (prompt || '').trim();
+    const hasPrompt = trimmedPrompt.length > 0;
+
+    // Check embedding provider (OpenAI vs Keyword)
+    const embeddingResult = hasPrompt ? await getEmbedding(trimmedPrompt) : { embedding: null, mode: 'keyword_fallback', provider: 'none' };
+    const hasVector = embeddingResult.embedding !== null;
+
+    // Parameterized SQL construction
     const whereClauses: string[] = ['cv.is_active = TRUE', "cm.launch_status = 'launched'"];
-    const params: any[] = [vectorString]; // $1 is always the query vector
-    let paramIndex = 2;
+    const params: any[] = [];
+    let paramIndex = 1;
+
+    let vectorPlaceholder = 'NULL::vector';
+    if (hasVector) {
+      vectorPlaceholder = `$${paramIndex}::vector`;
+      params.push(`[${embeddingResult.embedding!.join(',')}]`);
+      paramIndex++;
+    }
 
     if (parsedMinPrice !== null) {
       whereClauses.push(`cv.ex_showroom_price >= $${paramIndex}`);
@@ -76,21 +112,21 @@ export async function POST(req: NextRequest) {
       paramIndex++;
     }
 
-    if (fuelType && fuelType.trim() !== '' && fuelType !== 'all') {
-      whereClauses.push(`cv.fuel_type = $${paramIndex}::fuel_enum`);
-      params.push(fuelType.trim());
+    if (cleanFuel) {
+      whereClauses.push(`LOWER(cv.fuel_type::text) = LOWER($${paramIndex})`);
+      params.push(cleanFuel);
       paramIndex++;
     }
 
-    if (transmission && transmission.trim() !== '' && transmission !== 'all') {
-      whereClauses.push(`cv.transmission = $${paramIndex}::trans_enum`);
-      params.push(transmission.trim());
+    if (cleanTrans) {
+      whereClauses.push(`LOWER(cv.transmission::text) = LOWER($${paramIndex})`);
+      params.push(cleanTrans);
       paramIndex++;
     }
 
-    if (bodyType && bodyType.trim() !== '' && bodyType !== 'all') {
-      whereClauses.push(`cm.body_type = $${paramIndex}::body_type`);
-      params.push(bodyType.trim());
+    if (cleanBody) {
+      whereClauses.push(`LOWER(cm.body_type::text) = LOWER($${paramIndex})`);
+      params.push(cleanBody);
       paramIndex++;
     }
 
@@ -100,11 +136,27 @@ export async function POST(req: NextRequest) {
       paramIndex++;
     }
 
+    // Optional text search condition if prompt is supplied but vector is unavailable
+    if (hasPrompt && !hasVector) {
+      whereClauses.push(`(
+        cm.model_name ILIKE $${paramIndex} OR
+        cv.variant_name ILIKE $${paramIndex} OR
+        m.name ILIKE $${paramIndex} OR
+        cv.fuel_type::text ILIKE $${paramIndex} OR
+        cm.body_type::text ILIKE $${paramIndex}
+      )`);
+      params.push(`%${trimmedPrompt}%`);
+      paramIndex++;
+    }
+
     const whereSql = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
 
-    // Hybrid Query: pgvector Cosine Similarity Distance (<=>) + SQL Filters + Safety Score Weighting
+    params.push(parsedLimit);
+    const limitPlaceholder = `$${paramIndex}`;
+
+    // Hybrid SQL query: pgvector cosine similarity distance (<=>) + multi-attribute constraints + deterministic tie-breakers
     const hybridSql = `
-      SELECT 
+      SELECT
         cv.variant_id,
         cv.variant_name,
         cm.model_id,
@@ -121,23 +173,23 @@ export async function POST(req: NextRequest) {
         cv.safety_rating_ncap,
         cm.seating_capacity,
         COALESCE(
-          ARRAY_AGG(f.feature_name ORDER BY f.feature_name) FILTER (WHERE vf.is_standard = TRUE), 
+          ARRAY_AGG(f.feature_name ORDER BY f.feature_name) FILTER (WHERE vf.is_standard = TRUE),
           '{}'
         ) AS standard_features,
         ROUND(
-          (CASE 
-            WHEN cv.embedding IS NOT NULL 
-            THEN (1.0 - (cv.embedding <=> $1::vector))
-            ELSE 0.50 
+          (CASE
+            WHEN ${hasVector ? 'cv.embedding IS NOT NULL' : 'FALSE'}
+            THEN (1.0 - (cv.embedding <=> ${vectorPlaceholder}))
+            ELSE 0.50
           END)::numeric, 4
         ) AS similarity_score,
         ROUND(
           (
-            (CASE 
-              WHEN cv.embedding IS NOT NULL 
-              THEN (1.0 - (cv.embedding <=> $1::vector))
-              ELSE 0.50 
-            END) * 0.70 + 
+            (CASE
+              WHEN ${hasVector ? 'cv.embedding IS NOT NULL' : 'FALSE'}
+              THEN (1.0 - (cv.embedding <=> ${vectorPlaceholder}))
+              ELSE 0.50
+            END) * 0.70 +
             (COALESCE(cv.safety_rating_ncap, 3.0) / 5.0) * 0.30
           )::numeric, 4
         ) AS combined_relevance_score
@@ -147,7 +199,7 @@ export async function POST(req: NextRequest) {
       LEFT JOIN variant_features vf ON cv.variant_id = vf.variant_id
       LEFT JOIN features f ON vf.feature_id = f.feature_id
       ${whereSql}
-      GROUP BY 
+      GROUP BY
         cv.variant_id,
         cv.variant_name,
         cm.model_id,
@@ -164,110 +216,85 @@ export async function POST(req: NextRequest) {
         cv.safety_rating_ncap,
         cm.seating_capacity,
         cv.embedding
-      ORDER BY combined_relevance_score DESC, cv.safety_rating_ncap DESC NULLS LAST
-      LIMIT 12;
+      ORDER BY
+        combined_relevance_score DESC,
+        cv.safety_rating_ncap DESC NULLS LAST,
+        cv.ex_showroom_price ASC,
+        cv.variant_id ASC
+      LIMIT ${limitPlaceholder};
     `;
 
     const result = await query(hybridSql, params);
 
-    // Asynchronously log the search to customer_searches audit table
+    // Audit search to customer_searches asynchronously
     try {
       await query(
         `INSERT INTO customer_searches (
-          min_budget, max_budget, preferred_fuel, preferred_transmission, 
-          min_safety_rating, search_query
-        ) VALUES ($1, $2, $3::fuel_enum, $4::trans_enum, $5, $6)`,
+          min_budget, max_budget, preferred_fuel, preferred_transmission,
+          preferred_body_type, min_safety_rating, search_query
+        ) VALUES ($1, $2, $3::fuel_enum, $4::trans_enum, $5::body_type, $6, $7)`,
         [
           parsedMinPrice,
           parsedMaxPrice,
-          fuelType || null,
-          transmission || null,
+          cleanFuel ? cleanFuel : null,
+          cleanTrans ? cleanTrans : null,
+          cleanBody ? cleanBody : null,
           parsedMinSafety,
-          prompt || null,
+          trimmedPrompt || null,
         ]
       );
     } catch (auditErr) {
-      console.warn('Non-blocking: Failed to record search audit log:', auditErr);
+      console.warn('Non-blocking: Failed to insert search audit event:', auditErr);
     }
 
     return NextResponse.json({
       success: true,
       count: result.rows.length,
+      data_source: 'live_postgresql',
+      vector_mode: hasVector ? 'pgvector_cosine_distance' : hasPrompt ? 'sql_keyword_fallback' : 'multi_attribute_only',
       query: {
-        prompt,
+        prompt: trimmedPrompt,
         minPrice: parsedMinPrice,
         maxPrice: parsedMaxPrice,
-        fuelType: fuelType || null,
-        transmission: transmission || null,
-        bodyType: bodyType || null,
+        fuelType: cleanFuel,
+        transmission: cleanTrans,
+        bodyType: cleanBody,
         minSafety: parsedMinSafety,
       },
       data: result.rows,
     });
   } catch (err: any) {
-    console.warn('Primary DB query in /api/recommend threw error, utilizing resilient seed fallback:', err?.message);
+    console.error('[DATABASE ERROR] Recommendation query failed:', err?.message);
 
-    // Resilient fallback filtering with semantic keyword relevance calculation
-    const queryWords = (prompt || '').toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    // If caller specifically requested demo showcase mode (for offline viva test):
+    if (isDemoRequested) {
+      console.info('[DEMO MODE] Caller requested simulated offline showcase.');
+      let filtered = SEED_VARIANTS.filter((car) => car.is_active);
+      if (parsedMinPrice !== null) filtered = filtered.filter((c) => c.ex_showroom_price >= parsedMinPrice);
+      if (parsedMaxPrice !== null) filtered = filtered.filter((c) => c.ex_showroom_price <= parsedMaxPrice);
+      if (cleanFuel) filtered = filtered.filter((c) => c.fuel_type.toLowerCase() === cleanFuel.toLowerCase());
+      if (cleanTrans) filtered = filtered.filter((c) => c.transmission.toLowerCase() === cleanTrans.toLowerCase());
+      if (cleanBody) filtered = filtered.filter((c) => c.body_type.toLowerCase() === cleanBody.toLowerCase());
+      if (parsedMinSafety !== null) filtered = filtered.filter((c) => c.safety_rating_ncap >= parsedMinSafety);
 
-    let filtered = SEED_VARIANTS.filter((car) => car.is_active);
-
-    if (parsedMinPrice !== null) {
-      filtered = filtered.filter((c) => c.ex_showroom_price >= parsedMinPrice);
-    }
-    if (parsedMaxPrice !== null) {
-      filtered = filtered.filter((c) => c.ex_showroom_price <= parsedMaxPrice);
-    }
-    if (fuelType && fuelType.trim() !== '' && fuelType.toLowerCase() !== 'all') {
-      filtered = filtered.filter((c) => c.fuel_type.toLowerCase() === fuelType.toLowerCase());
-    }
-    if (transmission && transmission.trim() !== '' && transmission.toLowerCase() !== 'all') {
-      filtered = filtered.filter((c) => c.transmission.toLowerCase() === transmission.toLowerCase());
-    }
-    if (bodyType && bodyType.trim() !== '' && bodyType.toLowerCase() !== 'all') {
-      filtered = filtered.filter((c) => c.body_type.toLowerCase() === bodyType.toLowerCase());
-    }
-    if (parsedMinSafety !== null && parsedMinSafety > 0) {
-      filtered = filtered.filter((c) => c.safety_rating_ncap >= parsedMinSafety);
-    }
-
-    // Score based on prompt text keyword matches + safety weighting
-    const scoredResults = filtered.map((c) => {
-      let matchCount = 0;
-      const searchable = `${c.manufacturer_name} ${c.model_name} ${c.variant_name} ${c.fuel_type} ${c.transmission} ${c.body_type} ${c.standard_features.join(' ')}`.toLowerCase();
-
-      queryWords.forEach((word) => {
-        if (searchable.includes(word)) matchCount += 1;
+      return NextResponse.json({
+        success: true,
+        count: filtered.length,
+        data_source: 'simulated_offline_showcase',
+        is_simulated_demo: true,
+        data: filtered,
       });
+    }
 
-      const keywordRatio = queryWords.length > 0 ? matchCount / queryWords.length : 0.65;
-      const baseSimilarity = Math.min(Math.max(0.55 + keywordRatio * 0.40, 0.50), 0.98);
-      const safetyWeight = (c.safety_rating_ncap / 5.0) * 0.30;
-      const combinedScore = Math.round((baseSimilarity * 0.70 + safetyWeight) * 10000) / 10000;
-
-      return {
-        ...c,
-        similarity_score: Math.round(baseSimilarity * 10000) / 10000,
-        combined_relevance_score: combinedScore,
-      };
-    });
-
-    scoredResults.sort((a, b) => (b.combined_relevance_score || 0) - (a.combined_relevance_score || 0));
-
-    return NextResponse.json({
-      success: true,
-      count: scoredResults.length,
-      fallback: true,
-      query: {
-        prompt,
-        minPrice: parsedMinPrice,
-        maxPrice: parsedMaxPrice,
-        fuelType: fuelType || null,
-        transmission: transmission || null,
-        bodyType: bodyType || null,
-        minSafety: parsedMinSafety,
+    // Fail closed: Report actual database unavailability rather than silently masquerading as live DB
+    return NextResponse.json(
+      {
+        success: false,
+        code: 'DATABASE_UNAVAILABLE',
+        error: 'Database connection failed. Please ensure PostgreSQL is running and DATABASE_URL is configured.',
+        details: process.env.NODE_ENV === 'development' ? err?.message : undefined,
       },
-      data: scoredResults,
-    });
+      { status: 503 }
+    );
   }
 }
